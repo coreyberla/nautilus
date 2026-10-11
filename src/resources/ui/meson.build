@@ -15,7 +15,6 @@ blueprint_names = [
   'nautilus-grid-cell',
   'nautilus-grid-view-captions-dialog',
   'nautilus-history-controls',
-  'nautilus-name-cell',
   'nautilus-network-address-bar',
   'nautilus-network-cell',
   'nautilus-new-folder-dialog',
