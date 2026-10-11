@@ -14,6 +14,8 @@
  * BENCH_VIEW    "list" to use the list view for BENCH_IMAGES instead of the grid
  * BENCH_NOEXT   if set, name the images without an extension
  * BENCH_COUNT_WIDGETS  if set, print the widgets in the window by type
+ * BENCH_SCREENSHOT     save a PNG of the window to this path after loading
+ * BENCH_SYMLINKS       number of symlinks to images to add, which show emblems
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -383,6 +385,22 @@ print_widget_counts (GtkWidget *window)
     }
 }
 
+static void
+save_screenshot (GtkWidget  *window,
+                 const char *path)
+{
+    g_autoptr (GdkPaintable) paintable = gtk_widget_paintable_new (window);
+    g_autoptr (GtkSnapshot) snapshot = gtk_snapshot_new ();
+    g_autoptr (GskRenderNode) node = NULL;
+    g_autoptr (GdkTexture) texture = NULL;
+
+    gdk_paintable_snapshot (paintable, GDK_SNAPSHOT (snapshot),
+                            gtk_widget_get_width (window), gtk_widget_get_height (window));
+    node = gtk_snapshot_free_to_node (g_steal_pointer (&snapshot));
+    texture = gsk_renderer_render_texture (gtk_native_get_renderer (GTK_NATIVE (window)), node, NULL);
+    gdk_texture_save_to_png (texture, path);
+}
+
 static GtkScrolledWindow *
 find_scrolled_window (GtkWidget *widget)
 {
@@ -438,6 +456,14 @@ run_image_benchmark (guint n_images)
                                           NAUTILUS_PREFERENCES_DEFAULT_SORT_ORDER, sort));
     g_print ("images sorted by %s\n", sort);
 
+    for (guint i = 0; i < env_uint ("BENCH_SYMLINKS", 0); i++)
+    {
+        g_autofree char *link = g_strdup_printf ("%s/a_link_%05u", images_dir, i);
+        g_autofree char *target = g_strdup_printf (g_getenv ("BENCH_NOEXT") != NULL ? "image_%05u" : "image_%05u.png", i);
+
+        g_assert_cmpint (symlink (target, link), ==, 0);
+    }
+
     NautilusWindowSlot *slot = nautilus_window_slot_new (NAUTILUS_MODE_BROWSE);
     GtkWidget *window = gtk_window_new ();
     gtk_window_set_default_size (GTK_WINDOW (window), env_uint ("BENCH_WIDTH", 1280), 800);
@@ -482,6 +508,10 @@ run_image_benchmark (guint n_images)
     if (g_getenv ("BENCH_COUNT_WIDGETS") != NULL)
     {
         print_widget_counts (window);
+    }
+    if (g_getenv ("BENCH_SCREENSHOT") != NULL)
+    {
+        save_screenshot (window, g_getenv ("BENCH_SCREENSHOT"));
     }
 
     /* 2. Scroll to the end, where thumbnails aren't cached either. */
