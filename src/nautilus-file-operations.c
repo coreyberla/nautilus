@@ -7750,7 +7750,6 @@ extract_job_on_scanned (AutoarExtractor *extractor,
                         gpointer         user_data)
 {
     g_autoptr (GFileInfo) fsinfo = NULL;
-    guint64 free_size;
 
     guint64 total_size = autoar_extractor_get_total_size (extractor);
     GFile *output_file = autoar_extractor_get_output_file (extractor);
@@ -7763,13 +7762,21 @@ extract_job_on_scanned (AutoarExtractor *extractor,
                                            G_FILE_ATTRIBUTE_FILESYSTEM_READONLY,
                                            extract_job->common.cancellable,
                                            NULL);
-    free_size = g_file_info_get_attribute_uint64 (fsinfo,
-                                                  G_FILE_ATTRIBUTE_FILESYSTEM_FREE);
+
+    /* Some filesystems do not report free space; don't refuse to extract
+     * just because it is unknown. */
+    if (fsinfo == NULL ||
+        !g_file_info_has_attribute (fsinfo, G_FILE_ATTRIBUTE_FILESYSTEM_FREE))
+    {
+        return;
+    }
 
     /* FIXME: G_MAXUINT64 is the value used by autoar when the file size cannot
      * be determined. Ideally an API should be used instead.
      */
-    if (total_size != G_MAXUINT64 && total_size > free_size)
+    if (total_size != G_MAXUINT64 &&
+        total_size > g_file_info_get_attribute_uint64 (fsinfo,
+                                                       G_FILE_ATTRIBUTE_FILESYSTEM_FREE))
     {
         GFile *source_file = autoar_extractor_get_source_file (extractor);
         g_autofree gchar *basename = get_basename (source_file);
