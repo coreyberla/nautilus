@@ -1,0 +1,74 @@
+using Gtk 4.0;
+
+template $NautilusNameCell: $NautilusViewCell {
+  Box top_child {
+    TreeExpander expander {
+      indent-for-icon: false;
+      focusable: false;
+    }
+
+    Box content {
+      spacing: 6;
+      orientation: horizontal;
+      halign: fill;
+      valign: center;
+
+      CenterBox fixed_height_box {
+        valign: center;
+        width-request: bind template.icon-size;
+        height-request: bind template.icon-size;
+
+        center-widget: $NautilusImage icon {
+          valign: "center";
+
+          accessibility {
+            labelled-by: [
+              label,
+            ];
+          }
+        };
+      }
+
+      Box labels_box {
+        orientation: vertical;
+        halign: fill;
+        hexpand: true;
+        valign: center;
+
+        styles [
+          "column-name-labels-box",
+        ]
+
+        Box {
+          orientation: horizontal;
+          halign: fill;
+          hexpand: true;
+          spacing: 6;
+
+          Label label {
+            ellipsize: middle;
+            lines: 1;
+            max-width-chars: -1;
+            wrap: false;
+            wrap-mode: word_char;
+            halign: start;
+            has-tooltip: true;
+            attributes: "0 -1 insert-hyphens false";
+            query-tooltip => $on_label_query_tooltip();
+            label: bind template.item as <$NautilusViewItem>.file as <$NautilusFile>.display-name;
+          }
+
+          Box emblems_box {
+            orientation: horizontal;
+            halign: start;
+            spacing: 6;
+
+            styles [
+              "dim-label",
+            ]
+          }
+        }
+      }
+    }
+  }
+}

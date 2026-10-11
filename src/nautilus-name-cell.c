@@ -23,7 +23,6 @@ struct _NautilusNameCell
     NautilusViewCell parent_instance;
 
     GSignalGroup *item_signal_group;
-    GSignalGroup *file_signal_group;
 
     GQuark path_attribute_q;
     GFile *file_path_base_location;
@@ -35,7 +34,6 @@ struct _NautilusNameCell
     GtkWidget *fixed_height_box;
     GtkWidget *spinner;
     GtkWidget *icon;
-    GtkWidget *label;
     GtkWidget *emblems_box;
     GtkWidget *snippet_button;
     GtkLabel *snippet;
@@ -449,105 +447,9 @@ on_label_query_tooltip (GtkWidget  *widget,
 }
 
 static void
-update_name (NautilusNameCell *self)
-{
-    NautilusFile *file = g_signal_group_dup_target (self->file_signal_group);
-
-    gtk_label_set_text (GTK_LABEL (self->label),
-                        file != NULL ? nautilus_file_get_display_name (file) : NULL);
-    g_clear_object (&file);
-}
-
-static void
-on_item_bind (NautilusNameCell *self,
-              NautilusViewItem *item)
-{
-    g_signal_group_set_target (self->file_signal_group, nautilus_view_item_get_file (item));
-    update_name (self);
-}
-
-static void
-on_item_unbind (NautilusNameCell *self)
-{
-    g_signal_group_set_target (self->file_signal_group, NULL);
-}
-
-/* Built in code rather than from a template, as there's a cell for every
- * row of the list view, and rows are recreated whenever a folder loads. */
-static void
-build_ui (NautilusNameCell *self)
-{
-    g_autoptr (PangoAttrList) attributes = new_no_hyphens_attributes ();
-    GtkWidget *name_box;
-
-    self->top_child = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-    gtk_widget_set_parent (self->top_child, GTK_WIDGET (self));
-
-    self->expander = gtk_tree_expander_new ();
-    gtk_tree_expander_set_indent_for_icon (GTK_TREE_EXPANDER (self->expander), FALSE);
-    gtk_widget_set_focusable (self->expander, FALSE);
-    gtk_box_append (GTK_BOX (self->top_child), self->expander);
-
-    self->content = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
-    gtk_widget_set_halign (self->content, GTK_ALIGN_FILL);
-    gtk_widget_set_valign (self->content, GTK_ALIGN_CENTER);
-    gtk_box_append (GTK_BOX (self->top_child), self->content);
-
-    self->fixed_height_box = gtk_center_box_new ();
-    gtk_widget_set_valign (self->fixed_height_box, GTK_ALIGN_CENTER);
-    g_object_bind_property (self, "icon-size", self->fixed_height_box, "width-request",
-                            G_BINDING_SYNC_CREATE);
-    g_object_bind_property (self, "icon-size", self->fixed_height_box, "height-request",
-                            G_BINDING_SYNC_CREATE);
-    gtk_box_append (GTK_BOX (self->content), self->fixed_height_box);
-
-    self->icon = GTK_WIDGET (nautilus_image_new ());
-    gtk_widget_set_valign (self->icon, GTK_ALIGN_CENTER);
-    gtk_center_box_set_center_widget (GTK_CENTER_BOX (self->fixed_height_box), self->icon);
-
-    self->labels_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-    gtk_widget_set_halign (self->labels_box, GTK_ALIGN_FILL);
-    gtk_widget_set_hexpand (self->labels_box, TRUE);
-    gtk_widget_set_valign (self->labels_box, GTK_ALIGN_CENTER);
-    gtk_widget_add_css_class (self->labels_box, "column-name-labels-box");
-    gtk_box_append (GTK_BOX (self->content), self->labels_box);
-
-    name_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
-    gtk_widget_set_halign (name_box, GTK_ALIGN_FILL);
-    gtk_widget_set_hexpand (name_box, TRUE);
-    gtk_box_append (GTK_BOX (self->labels_box), name_box);
-
-    self->label = gtk_label_new (NULL);
-    gtk_label_set_ellipsize (GTK_LABEL (self->label), PANGO_ELLIPSIZE_MIDDLE);
-    gtk_label_set_lines (GTK_LABEL (self->label), 1);
-    gtk_label_set_max_width_chars (GTK_LABEL (self->label), -1);
-    gtk_label_set_wrap (GTK_LABEL (self->label), FALSE);
-    gtk_label_set_wrap_mode (GTK_LABEL (self->label), PANGO_WRAP_WORD_CHAR);
-    gtk_label_set_attributes (GTK_LABEL (self->label), attributes);
-    gtk_widget_set_halign (self->label, GTK_ALIGN_START);
-    gtk_widget_set_has_tooltip (self->label, TRUE);
-    g_signal_connect (self->label, "query-tooltip", G_CALLBACK (on_label_query_tooltip), NULL);
-    gtk_box_append (GTK_BOX (name_box), self->label);
-
-    gtk_accessible_update_relation (GTK_ACCESSIBLE (self->icon),
-                                    GTK_ACCESSIBLE_RELATION_LABELLED_BY, self->label, NULL,
-                                    -1);
-
-    self->emblems_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
-    gtk_widget_set_halign (self->emblems_box, GTK_ALIGN_START);
-    gtk_widget_add_css_class (self->emblems_box, "dim-label");
-    gtk_box_append (GTK_BOX (name_box), self->emblems_box);
-}
-
-static void
 nautilus_name_cell_init (NautilusNameCell *self)
 {
-    build_ui (self);
-
-    /* Follow the display name of the item's file. */
-    self->file_signal_group = g_signal_group_new (NAUTILUS_TYPE_FILE);
-    g_signal_group_connect_swapped (self->file_signal_group, "notify::display-name",
-                                    (GCallback) update_name, self);
+    gtk_widget_init_template (GTK_WIDGET (self));
 
     g_signal_connect (self, "notify::icon-size",
                       G_CALLBACK (on_icon_size_changed), NULL);
@@ -564,13 +466,7 @@ nautilus_name_cell_init (NautilusNameCell *self)
     g_signal_group_connect_swapped (self->item_signal_group, "file-changed",
                                     (GCallback) on_file_changed, self);
     g_signal_connect_object (self->item_signal_group, "bind",
-                             (GCallback) on_item_bind, self,
-                             G_CONNECT_SWAPPED);
-    g_signal_connect_object (self->item_signal_group, "bind",
                              (GCallback) on_file_changed, self,
-                             G_CONNECT_SWAPPED);
-    g_signal_connect_object (self->item_signal_group, "unbind",
-                             (GCallback) on_item_unbind, self,
                              G_CONNECT_SWAPPED);
 
     g_object_bind_property (self, "item",
@@ -585,9 +481,8 @@ nautilus_name_cell_dispose (GObject *object)
 
     g_clear_handle_id (&self->loading_timeout_id, g_source_remove);
     g_clear_object (&self->item_signal_group);
-    g_clear_object (&self->file_signal_group);
 
-    g_clear_pointer (&self->top_child, gtk_widget_unparent);
+    gtk_widget_dispose_template (GTK_WIDGET (self), NAUTILUS_TYPE_NAME_CELL);
 
     G_OBJECT_CLASS (nautilus_name_cell_parent_class)->dispose (object);
 }
@@ -675,6 +570,19 @@ nautilus_name_cell_class_init (NautilusNameCellClass *klass)
     g_type_ensure (NAUTILUS_TYPE_IMAGE);
 
     gtk_widget_class_set_layout_manager_type (widget_class, GTK_TYPE_BIN_LAYOUT);
+    gtk_widget_class_set_template_from_resource (widget_class, "/org/gnome/nautilus/ui/nautilus-name-cell.ui");
+
+    /* Needs to add the direct child of the template widget to dispose it since
+     * a plain GtkWidget doesn't dispose it's child automatically. */
+    gtk_widget_class_bind_template_child (widget_class, NautilusNameCell, top_child);
+    gtk_widget_class_bind_template_child (widget_class, NautilusNameCell, expander);
+    gtk_widget_class_bind_template_child (widget_class, NautilusNameCell, content);
+    gtk_widget_class_bind_template_child (widget_class, NautilusNameCell, fixed_height_box);
+    gtk_widget_class_bind_template_child (widget_class, NautilusNameCell, icon);
+    gtk_widget_class_bind_template_child (widget_class, NautilusNameCell, emblems_box);
+    gtk_widget_class_bind_template_child (widget_class, NautilusNameCell, labels_box);
+
+    gtk_widget_class_bind_template_callback (widget_class, on_label_query_tooltip);
 }
 
 NautilusViewCell *

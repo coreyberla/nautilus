@@ -94,6 +94,7 @@ src/resources/ui/nautilus-files-view-select-items.blp
 src/resources/ui/nautilus-grid-cell.blp
 src/resources/ui/nautilus-grid-view-captions-dialog.blp
 src/resources/ui/nautilus-history-controls.blp
+src/resources/ui/nautilus-name-cell.blp
 src/resources/ui/nautilus-network-address-bar.blp
 src/resources/ui/nautilus-network-cell.blp
 src/resources/ui/nautilus-new-folder-dialog.blp
