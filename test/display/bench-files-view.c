@@ -5,6 +5,9 @@
  * BENCH_DIRS    number of subdirectories, each with one file (default 2000)
  * BENCH_CHANGES number of files touched after load (default 2000)
  *
+ * BENCH_IMAGES  if set, instead show a folder with this many images in a
+ *               window and measure how long the visible thumbnails take
+ *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #define G_LOG_DOMAIN "bench-files-view"
@@ -19,6 +22,7 @@
 #include <nautilus-file.h>
 #include <nautilus-files-view.h>
 #include <nautilus-global-preferences.h>
+#include <nautilus-image.h>
 #include <nautilus-file-utilities.h>
 #include <nautilus-resources.h>
 #include <nautilus-tag-manager.h>
@@ -162,6 +166,182 @@ iterate_until_quiet (guint quiet_ms,
     }
 }
 
+typedef struct
+{
+    guint total;
+    guint thumbnail;
+    guint loading;
+    guint fallback;
+    GFile *first_source;
+} ImageStats;
+
+static void
+collect_image_stats (GtkWidget  *widget,
+                     ImageStats *stats)
+{
+    if (NAUTILUS_IS_IMAGE (widget) && gtk_widget_get_mapped (widget))
+    {
+        if (stats->first_source == NULL)
+        {
+            stats->first_source = nautilus_image_get_source (NAUTILUS_IMAGE (widget));
+        }
+        stats->total++;
+        switch (nautilus_image_get_status (NAUTILUS_IMAGE (widget)))
+        {
+            case NAUTILUS_IMAGE_STATUS_THUMBNAIL:
+            {
+                stats->thumbnail++;
+            }
+            break;
+
+            case NAUTILUS_IMAGE_STATUS_LOADING_ATTRIBUTES:
+            case NAUTILUS_IMAGE_STATUS_LOADING_THUMBNAIL:
+            {
+                stats->loading++;
+            }
+            break;
+
+            case NAUTILUS_IMAGE_STATUS_FALLBACK:
+            {
+                stats->fallback++;
+            }
+            break;
+        }
+    }
+
+    for (GtkWidget *child = gtk_widget_get_first_child (widget);
+         child != NULL;
+         child = gtk_widget_get_next_sibling (child))
+    {
+        collect_image_stats (child, stats);
+    }
+}
+
+/* Iterate until every visible image is done loading, and report it. If
+ * previous_first is given, also wait until other items are shown. */
+static GFile *
+measure_thumbnails (const char *label,
+                    GtkWidget  *window,
+                    gint64      start,
+                    GFile      *previous_first)
+{
+    double cpu_start = cpu_ms ();
+    ImageStats stats = { 0 };
+
+    while (ms_since (start) < 120000)
+    {
+        while (g_main_context_iteration (NULL, FALSE))
+        {
+        }
+
+        stats = (ImageStats) { 0 };
+        collect_image_stats (window, &stats);
+        if (stats.total > 0 && stats.loading == 0 &&
+            (previous_first == NULL || stats.first_source == NULL ||
+             !g_file_equal (previous_first, stats.first_source)))
+        {
+            break;
+        }
+        g_usleep (1000);
+    }
+
+    g_print ("%-16s %8.1f ms  (main thread CPU %.1f ms; %u visible: %u thumbnails, %u fallback, %u loading)\n",
+             label, ms_since (start), cpu_ms () - cpu_start,
+             stats.total, stats.thumbnail, stats.fallback, stats.loading);
+
+    return stats.first_source != NULL ? g_object_ref (stats.first_source) : NULL;
+}
+
+static GtkScrolledWindow *
+find_scrolled_window (GtkWidget *widget)
+{
+    if (GTK_IS_SCROLLED_WINDOW (widget))
+    {
+        return GTK_SCROLLED_WINDOW (widget);
+    }
+
+    for (GtkWidget *child = gtk_widget_get_first_child (widget);
+         child != NULL;
+         child = gtk_widget_get_next_sibling (child))
+    {
+        GtkScrolledWindow *found = find_scrolled_window (child);
+
+        if (found != NULL)
+        {
+            return found;
+        }
+    }
+
+    return NULL;
+}
+
+static int
+run_image_benchmark (guint n_images)
+{
+    const char *tmp_dir = test_get_tmp_dir ();
+    g_autofree char *images_dir = g_build_filename (tmp_dir, "images", NULL);
+    g_autoptr (GFile) images_location = g_file_new_for_path (images_dir);
+    g_autoptr (GFile) home = g_file_new_for_path (g_get_home_dir ());
+    gint64 start;
+
+    g_mkdir (images_dir, 0755);
+    for (guint i = 0; i < n_images; i++)
+    {
+        g_autofree char *name = g_strdup_printf ("image_%05u.png", i);
+        g_autoptr (GFile) location = g_file_get_child (images_location, name);
+
+        make_image_file (location, FALSE);
+    }
+
+    NautilusWindowSlot *slot = nautilus_window_slot_new (NAUTILUS_MODE_BROWSE);
+    GtkWidget *window = gtk_window_new ();
+    gtk_window_set_default_size (GTK_WINDOW (window), 1280, 800);
+    gtk_window_set_child (GTK_WINDOW (window), GTK_WIDGET (slot));
+    gtk_window_present (GTK_WINDOW (window));
+
+    nautilus_window_slot_open_location_full (slot, home, NULL);
+    ITERATE_WHILE (nautilus_window_slot_get_current_view (slot) == NULL);
+    NautilusFilesView *view = nautilus_window_slot_get_current_view (slot);
+    if (nautilus_files_view_get_view_id (view) != NAUTILUS_VIEW_GRID_ID)
+    {
+        nautilus_files_view_change (view, NAUTILUS_VIEW_GRID_ID);
+        view = nautilus_window_slot_get_current_view (slot);
+    }
+    ITERATE_WHILE (nautilus_files_view_get_loading (view));
+    iterate_until_quiet (500, 10000);
+
+    /* 1. Cold: no thumbnails cached yet. */
+    start = g_get_monotonic_time ();
+    nautilus_files_view_set_location (view, images_location);
+    ITERATE_WHILE (nautilus_files_view_get_loading (view));
+    g_print ("images loaded:   %8.1f ms  (%u images)\n", ms_since (start), n_images);
+    g_autoptr (GFile) first_shown = measure_thumbnails ("thumbs cold:", window, start, NULL);
+
+    /* 2. Scroll to the end, where thumbnails aren't cached either. */
+    g_autoptr (GFile) first_shown_before_scroll = g_object_ref (first_shown);
+    GtkScrolledWindow *scrolled = find_scrolled_window (window);
+    GtkAdjustment *vadjustment = gtk_scrolled_window_get_vadjustment (scrolled);
+    start = g_get_monotonic_time ();
+    gtk_adjustment_set_value (vadjustment, gtk_adjustment_get_upper (vadjustment));
+    g_clear_object (&first_shown);
+    first_shown = measure_thumbnails ("thumbs scrolled:", window, start, first_shown_before_scroll);
+
+    /* 3. Warm: revisit with thumbnails cached on disk. */
+    nautilus_files_view_set_location (view, home);
+    ITERATE_WHILE (nautilus_files_view_get_loading (view));
+    iterate_until_quiet (500, 10000);
+    start = g_get_monotonic_time ();
+    nautilus_files_view_set_location (view, images_location);
+    ITERATE_WHILE (nautilus_files_view_get_loading (view));
+    g_clear_object (&first_shown);
+    first_shown = measure_thumbnails ("thumbs cached:", window, start, NULL);
+
+    gtk_window_destroy (GTK_WINDOW (window));
+    test_clear_tmp_dir ();
+
+    return 0;
+}
+
 int
 main (int   argc,
       char *argv[])
@@ -175,6 +355,16 @@ main (int   argc,
     gint64 start;
     double cpu_start;
 
+    guint n_images = env_uint ("BENCH_IMAGES", 0);
+    g_autofree char *cache_dir = NULL;
+
+    if (n_images > 0)
+    {
+        /* Start without any cached thumbnails. */
+        cache_dir = g_dir_make_tmp ("bench-cache-XXXXXX", NULL);
+        g_setenv ("XDG_CACHE_HOME", cache_dir, TRUE);
+    }
+
     gtk_init ();
     g_log_set_debug_enabled (g_getenv ("BENCH_DEBUG") != NULL);
     nautilus_register_resource ();
@@ -184,6 +374,12 @@ main (int   argc,
     test_init_config_dir ();
 
     g_autoptr (NautilusApplication) app = nautilus_application_new ();
+
+    if (n_images > 0)
+    {
+        return run_image_benchmark (n_images);
+    }
+
     const char *tmp_dir = test_get_tmp_dir ();
     g_autoptr (GFile) tmp_location = g_file_new_for_path (tmp_dir);
 
