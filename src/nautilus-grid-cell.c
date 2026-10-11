@@ -282,6 +282,13 @@ nautilus_grid_cell_dispose (GObject *object)
 #define EMBLEMS_BOX_WIDTH 18
 #define VERTICAL_PADDING 6
 
+/* The width of a cell's content, not including any padding. */
+int
+nautilus_grid_cell_get_width_for_icon_size (int icon_size)
+{
+    return EMBLEMS_BOX_WIDTH + icon_size + EMBLEMS_BOX_WIDTH;
+}
+
 static void
 nautilus_grid_cell_measure (GtkWidget      *widget,
                             GtkOrientation  orientation,
@@ -296,7 +303,7 @@ nautilus_grid_cell_measure (GtkWidget      *widget,
     int width, child_min, child_nat;
 
     g_object_get (self, "icon-size", &icon_size, NULL);
-    width = EMBLEMS_BOX_WIDTH + icon_size + EMBLEMS_BOX_WIDTH;
+    width = nautilus_grid_cell_get_width_for_icon_size (icon_size);
 
     /* We always expect our layout to fit into this width. Check that
      * this is indeed the case. This also shuts up the

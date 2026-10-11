@@ -34,6 +34,8 @@ struct _NautilusGridView
 
 G_DEFINE_FINAL_TYPE (NautilusGridView, nautilus_grid_view, NAUTILUS_TYPE_LIST_BASE)
 
+#define MAX_COLUMNS 20
+
 #define get_view_item(li) \
         (NAUTILUS_VIEW_ITEM (gtk_tree_list_row_get_item (GTK_TREE_LIST_ROW (gtk_list_item_get_item (li)))))
 
@@ -186,6 +188,8 @@ set_captions_from_preferences (NautilusGridView *self)
     }
 }
 
+static void on_width_changed (NautilusGridView *self);
+
 static void
 real_set_zoom_level (NautilusListBase *list_base,
                      int               new_level)
@@ -211,6 +215,11 @@ real_set_zoom_level (NautilusListBase *list_base,
     set_captions_from_preferences (self);
 
     g_object_notify (G_OBJECT (self), "icon-size");
+
+    if (self->view_ui != NULL)
+    {
+        on_width_changed (self);
+    }
 }
 
 /* The generic implementation in src/nautilus-list-base.c doesn't allow the
@@ -506,7 +515,7 @@ create_view_ui (NautilusGridView *self)
      * activation, as it affects the selection behavior as well (e.g. selects on
      * hover). Setting it to FALSE gives us the expected behavior. */
     gtk_grid_view_set_single_click_activate (GTK_GRID_VIEW (widget), FALSE);
-    gtk_grid_view_set_max_columns (GTK_GRID_VIEW (widget), 20);
+    gtk_grid_view_set_max_columns (GTK_GRID_VIEW (widget), MAX_COLUMNS);
     gtk_grid_view_set_tab_behavior (GTK_GRID_VIEW (widget), GTK_LIST_TAB_ITEM);
 
     gtk_accessible_update_property (GTK_ACCESSIBLE (widget),
@@ -522,6 +531,36 @@ create_view_ui (NautilusGridView *self)
     g_signal_connect (widget, "activate", G_CALLBACK (on_grid_view_item_activated), self);
 
     return GTK_GRID_VIEW (widget);
+}
+
+/* GtkGridView keeps widgets for max-columns × 30 rows, so don't allow more
+ * columns than can fit. Cell content width without padding and spacing
+ * underestimates the space a column takes, so this never limits the layout. */
+static void
+update_max_columns (NautilusGridView *self,
+                    int               width)
+{
+    if (width <= 0)
+    {
+        return;
+    }
+
+    int cell_width = nautilus_grid_cell_get_width_for_icon_size (get_icon_size_for_zoom_level (self->zoom_level));
+    guint max_columns = CLAMP (width / MAX (cell_width, 1), 1, MAX_COLUMNS);
+
+    if (self->view_ui != NULL &&
+        gtk_grid_view_get_max_columns (self->view_ui) != max_columns)
+    {
+        gtk_grid_view_set_max_columns (self->view_ui, max_columns);
+    }
+}
+
+static void
+on_width_changed (NautilusGridView *self)
+{
+    GtkAdjustment *hadjustment = gtk_scrollable_get_hadjustment (GTK_SCROLLABLE (self->view_ui));
+
+    update_max_columns (self, gtk_adjustment_get_page_size (hadjustment));
 }
 
 static void
@@ -567,6 +606,10 @@ nautilus_grid_view_init (NautilusGridView *self)
 
     gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scrolled_window),
                                    GTK_WIDGET (self->view_ui));
+    /* The page size of the horizontal adjustment is the width of the view. */
+    g_signal_connect_object (gtk_scrollable_get_hadjustment (GTK_SCROLLABLE (self->view_ui)),
+                             "notify::page-size", G_CALLBACK (on_width_changed), self,
+                             G_CONNECT_SWAPPED);
 
     g_signal_connect_object (gtk_filechooser_preferences,
                              "changed::" NAUTILUS_PREFERENCES_SORT_DIRECTORIES_FIRST,
