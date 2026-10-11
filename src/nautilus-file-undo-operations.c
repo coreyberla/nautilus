@@ -1686,6 +1686,10 @@ trash_redo_func (NautilusFileUndoInfo           *info,
 
         g_list_free (locations);
     }
+    else
+    {
+        file_undo_info_complete_apply (info, FALSE, FALSE);
+    }
 }
 
 static void
@@ -1964,6 +1968,9 @@ rec_permissions_undo_func (NautilusFileUndoInfo           *info,
 
     if (files_list == NULL)
     {
+        /* Nothing to restore; still complete the operation so that the undo
+         * manager doesn't consider it to be running forever. */
+        file_undo_info_complete_apply (info, FALSE, FALSE);
         return;
     }
 
