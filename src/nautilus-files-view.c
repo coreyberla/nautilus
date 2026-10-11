@@ -4238,7 +4238,6 @@ process_pending_files (NautilusFilesView *self)
 
     g_autoptr (GList) pending_additions = NULL;
     g_autoptr (GHashTable) files_removed = g_hash_table_new (NULL, NULL);
-    g_autoptr (GHashTable) files_just_added = g_hash_table_new (NULL, NULL);
 
     remove_fad_duplicates (&files_added);
     remove_fad_duplicates (&files_changed);
@@ -4251,7 +4250,6 @@ process_pending_files (NautilusFilesView *self)
         if (should_add_file)
         {
             pending_additions = g_list_prepend (pending_additions, pending->file);
-            g_hash_table_add (files_just_added, pending->file);
         }
 
         /* Acknowledge the files that were pending to be revealed */
@@ -4277,12 +4275,6 @@ process_pending_files (NautilusFilesView *self)
     {
         FileAndDirectory *pending = node->data;
         gboolean should_show_file = still_should_show_file (self, pending);
-
-        if (should_show_file && g_hash_table_contains (files_just_added, pending->file))
-        {
-            /* Just added with up-to-date info, nothing to update. */
-            continue;
-        }
 
         if (should_show_file)
         {
