@@ -177,19 +177,25 @@ skip_button_cb (NautilusFileConflictDialog *dialog)
     gtk_window_close (GTK_WINDOW (dialog));
 }
 
+/* The new name is used as a child of the destination folder, so it must be a
+ * single path component: otherwise the file would end up in another folder. */
+static gboolean
+new_name_is_valid (NautilusFileConflictDialog *dialog)
+{
+    const char *name = gtk_editable_get_text (GTK_EDITABLE (dialog->entry));
+
+    return g_strcmp0 (name, "") != 0 &&
+           g_strcmp0 (name, dialog->conflict_name) != 0 &&
+           strchr (name, '/') == NULL &&
+           g_strcmp0 (name, ".") != 0 &&
+           g_strcmp0 (name, "..") != 0;
+}
+
 static void
 entry_text_changed_cb (GtkEditable                *entry,
                        NautilusFileConflictDialog *dialog)
 {
-    if (g_strcmp0 (gtk_editable_get_text (GTK_EDITABLE (entry)), "") != 0 &&
-        g_strcmp0 (gtk_editable_get_text (GTK_EDITABLE (entry)), dialog->conflict_name) != 0)
-    {
-        gtk_widget_set_sensitive (dialog->rename_button, TRUE);
-    }
-    else
-    {
-        gtk_widget_set_sensitive (dialog->rename_button, FALSE);
-    }
+    gtk_widget_set_sensitive (dialog->rename_button, new_name_is_valid (dialog));
 }
 
 static int
@@ -323,7 +329,7 @@ activate_buttons (NautilusFileConflictDialog *fcd)
 {
     gtk_widget_set_sensitive (GTK_WIDGET (fcd->cancel_button), TRUE);
     gtk_widget_set_sensitive (GTK_WIDGET (fcd->skip_button), TRUE);
-    gtk_widget_set_sensitive (GTK_WIDGET (fcd->rename_button), TRUE);
+    gtk_widget_set_sensitive (GTK_WIDGET (fcd->rename_button), new_name_is_valid (fcd));
     gtk_widget_set_sensitive (GTK_WIDGET (fcd->replace_button), TRUE);
     gtk_widget_set_sensitive (GTK_WIDGET (fcd->expander), TRUE);
 }
