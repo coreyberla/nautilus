@@ -389,3 +389,10 @@ rubberband {
 .toolbar.no-bottom-padding {
   padding-bottom: 0px;
 }
+
+.nautilus-file-chooser .drop-overlay {
+  background-color: color-mix(in srgb, var(--window-bg-color) 85%, transparent);
+  border: 2px dashed var(--accent-color);
+  border-radius: 12px;
+  margin: 6px;
+}

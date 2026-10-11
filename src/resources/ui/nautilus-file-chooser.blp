@@ -281,12 +281,6 @@ template $NautilusFileChooser: Adw.Window {
                 "flat-dropdown",
               ]
             }
-
-            DropTarget {
-              actions: copy;
-              formats: "GdkFileList";
-              drop => $on_file_drop();
-            }
           }
         };
       };
@@ -305,6 +299,15 @@ template $NautilusFileChooser: Adw.Window {
       filters_dropdown.show-arrow: false;
       filters_dropdown.factory: builder_list_item_image;
     }
+  }
+
+  DropTarget {
+    actions: copy;
+    formats: "GdkFileList";
+    propagation-phase: capture;
+    enter => $on_file_drag_enter();
+    leave => $on_file_drag_leave();
+    drop => $on_file_drop();
   }
 
   ShortcutController {

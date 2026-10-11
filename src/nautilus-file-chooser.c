@@ -56,6 +56,7 @@ struct _NautilusFileChooser
     GtkWidget *filename_entry;
     GtkWidget *new_folder_button;
     GtkWidget *title_widget;
+    GtkWidget *drop_overlay;
 
     NautilusFilenameValidator *validator;
     AdwBreakpoint *breakpoint;
@@ -360,20 +361,44 @@ update_cursor (NautilusFileChooser *self)
     }
 }
 
+static GdkDragAction
+on_file_drag_enter (GtkDropTarget *target,
+                    gdouble        x,
+                    gdouble        y,
+                    gpointer       user_data)
+{
+    NautilusFileChooser *self = user_data;
+
+    gtk_widget_set_visible (self->drop_overlay, TRUE);
+
+    return GDK_ACTION_COPY;
+}
+
 static void
+on_file_drag_leave (GtkDropTarget *target,
+                    gpointer       user_data)
+{
+    NautilusFileChooser *self = user_data;
+
+    gtk_widget_set_visible (self->drop_overlay, FALSE);
+}
+
+static gboolean
 on_file_drop (GtkDropTarget *target,
               const GValue  *value,
               gdouble        x,
               gdouble        y,
               gpointer       user_data)
 {
+    NautilusFileChooser *self = user_data;
     GSList *locations = g_value_get_boxed (value);
 
-    g_return_if_fail (locations != NULL);
+    gtk_widget_set_visible (self->drop_overlay, FALSE);
+
+    g_return_val_if_fail (locations != NULL, FALSE);
 
     g_autolist (NautilusFile) selection = NULL;
     g_autoptr (GFile) location = NULL;
-    NautilusFileChooser *self = user_data;
 
     for (GSList *l = locations; l != NULL; l = l->next)
     {
@@ -395,6 +420,8 @@ on_file_drop (GtkDropTarget *target,
     }
 
     nautilus_window_slot_open_location_full (self->slot, location, selection);
+
+    return TRUE;
 }
 
 static void
@@ -831,6 +858,22 @@ nautilus_file_chooser_init (NautilusFileChooser *self)
     gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (controller), 0);
     g_signal_connect (controller, "pressed", G_CALLBACK (on_click_gesture_pressed), self);
 
+    /* Wrap the content in an overlay to show a hint while dragging files over
+     * the window, since they can be dropped anywhere to select them. */
+    GtkWidget *content = g_object_ref (adw_window_get_content (ADW_WINDOW (self)));
+    GtkWidget *overlay = gtk_overlay_new ();
+    adw_window_set_content (ADW_WINDOW (self), overlay);
+    gtk_overlay_set_child (GTK_OVERLAY (overlay), content);
+    g_object_unref (content);
+
+    self->drop_overlay = adw_status_page_new ();
+    adw_status_page_set_icon_name (ADW_STATUS_PAGE (self->drop_overlay), "document-send-symbolic");
+    adw_status_page_set_title (ADW_STATUS_PAGE (self->drop_overlay), _("Drop Here to Select"));
+    gtk_widget_add_css_class (self->drop_overlay, "drop-overlay");
+    gtk_widget_set_can_target (self->drop_overlay, FALSE);
+    gtk_widget_set_visible (self->drop_overlay, FALSE);
+    gtk_overlay_add_overlay (GTK_OVERLAY (overlay), self->drop_overlay);
+
     /* The factory is set in the ui, but we need to set the popup (list) factory
      * in code to make the checkmark appear correctly. */
     GtkListItemFactory *factory = gtk_signal_list_item_factory_new ();
@@ -913,6 +956,8 @@ nautilus_file_chooser_class_init (NautilusFileChooserClass *klass)
     gtk_widget_class_bind_template_callback (widget_class, nautilus_filename_validator_validate);
     gtk_widget_class_bind_template_callback (widget_class, on_validator_has_feedback_changed);
     gtk_widget_class_bind_template_callback (widget_class, on_validator_will_overwrite_changed);
+    gtk_widget_class_bind_template_callback (widget_class, on_file_drag_enter);
+    gtk_widget_class_bind_template_callback (widget_class, on_file_drag_leave);
     gtk_widget_class_bind_template_callback (widget_class, on_file_drop);
     gtk_widget_class_bind_template_callback (widget_class, get_filter_width_chars);
 
