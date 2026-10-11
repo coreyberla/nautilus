@@ -554,6 +554,43 @@ nautilus_image_get_source (NautilusImage *self)
  * - Check if a valid thumbnail exists in cache, otherwise create a new one
  *
  */
+static void
+start_loading (NautilusImage *self)
+{
+    self->cancellable = g_cancellable_new ();
+    self->is_loading_attributes = TRUE;
+
+    /* First query the file info to check size and type */
+    g_file_query_info_async (self->source,
+                             G_FILE_ATTRIBUTE_STANDARD_SIZE ","
+                             G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE ","
+                             G_FILE_ATTRIBUTE_STANDARD_FAST_CONTENT_TYPE ","
+                             G_FILE_ATTRIBUTE_ACCESS_CAN_READ ","
+                             G_FILE_ATTRIBUTE_TIME_MODIFIED ","
+                             G_FILE_ATTRIBUTE_THUMBNAIL_IS_VALID ","
+                             G_FILE_ATTRIBUTE_THUMBNAILING_FAILED ","
+                             G_FILE_ATTRIBUTE_THUMBNAIL_PATH,
+                             G_FILE_QUERY_INFO_NONE,
+                             G_PRIORITY_DEFAULT,
+                             self->cancellable,
+                             file_info_ready_callback,
+                             self);
+}
+
+static void
+stop_loading (NautilusImage *self)
+{
+    self->is_loading_attributes = FALSE;
+    g_cancellable_cancel (self->cancellable);
+    g_clear_object (&self->cancellable);
+}
+
+static gboolean
+is_loading (NautilusImage *self)
+{
+    return self->cancellable != NULL && self->texture == NULL && self->error == NULL;
+}
+
 void
 nautilus_image_set_source (NautilusImage *self,
                            GFile         *source)
@@ -571,30 +608,11 @@ nautilus_image_set_source (NautilusImage *self,
     self->source_mtime = 0;
     g_clear_error (&self->error);
 
-    self->is_loading_attributes = FALSE;
-    g_cancellable_cancel (self->cancellable);
-    g_clear_object (&self->cancellable);
+    stop_loading (self);
 
-    if (source != NULL)
+    if (source != NULL && gtk_widget_get_mapped (GTK_WIDGET (self)))
     {
-        self->cancellable = g_cancellable_new ();
-        self->is_loading_attributes = TRUE;
-
-        /* First query the file info to check size and type */
-        g_file_query_info_async (self->source,
-                                 G_FILE_ATTRIBUTE_STANDARD_SIZE ","
-                                 G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE ","
-                                 G_FILE_ATTRIBUTE_STANDARD_FAST_CONTENT_TYPE ","
-                                 G_FILE_ATTRIBUTE_ACCESS_CAN_READ ","
-                                 G_FILE_ATTRIBUTE_TIME_MODIFIED ","
-                                 G_FILE_ATTRIBUTE_THUMBNAIL_IS_VALID ","
-                                 G_FILE_ATTRIBUTE_THUMBNAILING_FAILED ","
-                                 G_FILE_ATTRIBUTE_THUMBNAIL_PATH,
-                                 G_FILE_QUERY_INFO_NONE,
-                                 G_PRIORITY_DEFAULT,
-                                 self->cancellable,
-                                 file_info_ready_callback,
-                                 self);
+        start_loading (self);
     }
 
     gtk_widget_queue_draw (GTK_WIDGET (self));
@@ -810,6 +828,36 @@ real_measure (GtkWidget      *widget,
     *natural_baseline = -1;
 }
 
+/* Only load while shown. List and grid views may bind and map many more
+ * items than they end up showing, e.g. when scrolling far, and unmap the
+ * rest again shortly after. Thumbnailing all of those delays visible ones. */
+static void
+real_map (GtkWidget *widget)
+{
+    NautilusImage *self = NAUTILUS_IMAGE (widget);
+
+    GTK_WIDGET_CLASS (nautilus_image_parent_class)->map (widget);
+
+    if (self->source != NULL && self->cancellable == NULL &&
+        self->texture == NULL && self->error == NULL)
+    {
+        start_loading (self);
+    }
+}
+
+static void
+real_unmap (GtkWidget *widget)
+{
+    NautilusImage *self = NAUTILUS_IMAGE (widget);
+
+    if (is_loading (self))
+    {
+        stop_loading (self);
+    }
+
+    GTK_WIDGET_CLASS (nautilus_image_parent_class)->unmap (widget);
+}
+
 static void
 nautilus_image_dispose (GObject *object)
 {
@@ -839,6 +887,8 @@ nautilus_image_class_init (NautilusImageClass *klass)
 
     widget_class->snapshot = real_snapshot;
     widget_class->measure = real_measure;
+    widget_class->map = real_map;
+    widget_class->unmap = real_unmap;
 
     update_thumbnail_limit ();
     g_signal_connect_swapped (nautilus_preferences,
