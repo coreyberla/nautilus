@@ -6028,9 +6028,11 @@ link_file (CopyMoveJob  *job,
             dest = get_target_file_for_link (src, dest_dir, *dest_fs_type, count++);
             continue;
         }
-        else if (error != NULL && !IS_IO_ERROR (error, CANCELLED))
+        /* Other error, or no local path to link to (in which case there is
+         * no GError). */
+        else if (not_local ||
+                 (error != NULL && !IS_IO_ERROR (error, CANCELLED)))
         {
-            /* Other error */
             if (common->skip_all_error)
             {
                 return;
