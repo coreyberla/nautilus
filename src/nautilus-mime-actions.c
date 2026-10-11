@@ -621,11 +621,19 @@ typedef struct
 } TrashBrokenSymbolicLinkData;
 
 static void
+trash_broken_symbolic_link_data_free (TrashBrokenSymbolicLinkData *data)
+{
+    g_clear_weak_pointer (&data->parent_window);
+    nautilus_file_unref (data->file);
+    g_free (data);
+}
+
+static void
 trash_symbolic_link_cb (AdwDialog *dialog,
                         char      *response,
                         gpointer   user_data)
 {
-    g_autofree TrashBrokenSymbolicLinkData *data = user_data;
+    TrashBrokenSymbolicLinkData *data = user_data;
 
     if (g_strcmp0 (response, "move-to-trash") == 0)
     {
@@ -700,8 +708,10 @@ report_broken_symbolic_link (GtkWindow    *parent_window,
      */
 
     data = g_new0 (TrashBrokenSymbolicLinkData, 1);
-    data->parent_window = parent_window;
-    data->file = file;
+    g_set_weak_pointer (&data->parent_window, parent_window);
+    data->file = nautilus_file_ref (file);
+    g_object_set_data_full (G_OBJECT (dialog), "trash-broken-symbolic-link-data",
+                            data, (GDestroyNotify) trash_broken_symbolic_link_data_free);
 
     g_signal_connect (G_OBJECT (dialog),
                       "response",
@@ -865,11 +875,10 @@ list_to_parameters_foreach (GAppInfo  *application,
                             GList    **ret)
 {
     ApplicationLaunchParameters *parameters;
-
-    uris = g_list_reverse (uris);
+    g_autoptr (GList) ordered_uris = g_list_reverse (g_list_copy (uris));
 
     parameters = application_launch_parameters_new
-                     (application, uris);
+                     (application, ordered_uris);
     *ret = g_list_prepend (*ret, parameters);
 }
 
@@ -1003,7 +1012,8 @@ activation_parameters_free (ActivateParameters *parameters)
     g_clear_pointer (&parameters->open_in_app_uris, g_queue_free);
     g_clear_pointer (&parameters->launch_files, g_queue_free);
     g_clear_pointer (&parameters->launch_in_terminal_files, g_queue_free);
-    g_list_free (parameters->open_in_app_parameters);
+    g_list_free_full (parameters->open_in_app_parameters,
+                      (GDestroyNotify) application_launch_parameters_free);
     g_list_free (parameters->unhandled_open_in_app_uris);
     g_free (parameters);
 }
@@ -1199,15 +1209,18 @@ open_with_response_cb (GtkDialog *dialog,
     GAppInfo *info;
     ActivateParametersInstall *parameters = user_data;
 
-    if (response_id != GTK_RESPONSE_OK)
+    info = response_id == GTK_RESPONSE_OK ?
+           gtk_app_chooser_get_app_info (GTK_APP_CHOOSER (dialog)) : NULL;
+
+    if (info == NULL)
     {
         gtk_window_destroy (GTK_WINDOW (dialog));
+        activate_parameters_install_free (parameters);
         return;
     }
 
     parent_window = parameters->parent_window;
-    file = g_object_get_data (G_OBJECT (dialog), "mime-action:file");
-    info = gtk_app_chooser_get_app_info (GTK_APP_CHOOSER (dialog));
+    file = nautilus_file_ref (g_object_get_data (G_OBJECT (dialog), "mime-action:file"));
 
     gtk_window_destroy (GTK_WINDOW (dialog));
 
@@ -1215,6 +1228,7 @@ open_with_response_cb (GtkDialog *dialog,
 
     nautilus_launch_application (info, &(NautilusFileList){ .data = file }, parent_window);
 
+    nautilus_file_unref (file);
     g_object_unref (info);
 
     activate_parameters_install_free (parameters);
@@ -1317,8 +1331,10 @@ search_for_application_dbus_call_notify_cb (GDBusProxy   *proxy,
     variant = g_dbus_proxy_call_finish (proxy, result, &error);
     if (variant == NULL)
     {
-        if (!g_dbus_error_is_remote_error (error) ||
-            g_strcmp0 (g_dbus_error_get_remote_error (error), "org.freedesktop.PackageKit.Modify.Failed") == 0)
+        g_autofree char *remote_error = g_dbus_error_get_remote_error (error);
+
+        if (remote_error == NULL ||
+            g_strcmp0 (remote_error, "org.freedesktop.PackageKit.Modify.Failed") == 0)
         {
             char *message;
 
@@ -1408,13 +1424,17 @@ pk_proxy_appeared_cb (GObject      *source,
     g_autofree char *content_type_description = NULL;
 
     proxy = g_dbus_proxy_new_for_bus_finish (res, &error);
-    name_owner = g_dbus_proxy_get_name_owner (proxy);
+    if (proxy != NULL)
+    {
+        name_owner = g_dbus_proxy_get_name_owner (proxy);
+    }
 
     if (error != NULL || name_owner == NULL)
     {
         g_debug ("Couldn't call Modify on the PackageKit interface: %s",
                  error != NULL ? error->message : "no owner for PackageKit");
         g_clear_error (&error);
+        g_clear_object (&proxy);
 
         /* show an unhelpful dialog */
         show_unhandled_type_error (parameters_install);
@@ -1454,8 +1474,11 @@ application_unhandled_uri (ActivateParameters *parameters,
 {
     /* copy the parts of parameters we are interested in as the orignal will be unref'd */
     ActivateParametersInstall *parameters_install = g_new0 (ActivateParametersInstall, 1);
-    parameters_install->slot = parameters->slot;
-    g_object_add_weak_pointer (G_OBJECT (parameters_install->slot), (gpointer *) &parameters_install->slot);
+    if (parameters->slot)
+    {
+        parameters_install->slot = parameters->slot;
+        g_object_add_weak_pointer (G_OBJECT (parameters_install->slot), (gpointer *) &parameters_install->slot);
+    }
     if (parameters->parent_window)
     {
         parameters_install->parent_window = parameters->parent_window;
@@ -1653,7 +1676,9 @@ activate_files_internal (ActivateParameters *parameters)
         g_chdir (parameters->activation_directory);
     }
 
-    display = gtk_widget_get_display (GTK_WIDGET (parameters->parent_window));
+    display = parameters->parent_window != NULL ?
+              gtk_widget_get_display (GTK_WIDGET (parameters->parent_window)) :
+              gdk_display_get_default ();
     for (l = g_queue_peek_head_link (parameters->launch_files); l != NULL; l = l->next)
     {
         g_autofree char *uri = NULL;
@@ -1772,7 +1797,6 @@ activate_files_internal (ActivateParameters *parameters)
             nautilus_launch_application_by_uri (one_parameters->application,
                                                 one_parameters->uris,
                                                 parameters->parent_window);
-            application_launch_parameters_free (one_parameters);
         }
 
         for (l = parameters->unhandled_open_in_app_uris; l != NULL; l = l->next)
@@ -1965,11 +1989,11 @@ activate_activation_uris_ready_callback (GList    *files_ignore,
 
         if (nautilus_file_is_broken_symbolic_link (file))
         {
-            launch_location_free (location);
-            parameters->locations = g_list_delete_link (parameters->locations, l);
             pause_activation_timed_cancel (parameters);
             report_broken_symbolic_link (parameters->parent_window, file);
             unpause_activation_timed_cancel (parameters);
+            launch_location_free (location);
+            parameters->locations = g_list_delete_link (parameters->locations, l);
             continue;
         }
 
@@ -2021,15 +2045,16 @@ activate_activation_uris_ready_callback (GList    *files_ignore,
 static void
 activate_regular_files (ActivateParameters *parameters)
 {
-    GList *l, *files;
+    GList *l, *next, *files;
     NautilusFile *file;
     LaunchLocation *location;
 
     /* link target info might be stale, re-read it */
-    for (l = parameters->locations; l != NULL; l = l->next)
+    for (l = parameters->locations; l != NULL; l = next)
     {
         location = l->data;
         file = location->file;
+        next = l->next;
 
         if (file_was_cancelled (file))
         {
@@ -2051,6 +2076,25 @@ activate_regular_files (ActivateParameters *parameters)
         &parameters->files_handle,
         activate_activation_uris_ready_callback, parameters);
     nautilus_file_list_free (files);
+}
+
+/* Mounting and starting run concurrently, so only move on once both are done. */
+static void
+activation_mountables_done (ActivateParameters *parameters)
+{
+    if (parameters->mountables != NULL || parameters->start_mountables != NULL)
+    {
+        return;
+    }
+
+    if (g_cancellable_is_cancelled (parameters->cancellable))
+    {
+        activation_parameters_free (parameters);
+    }
+    else
+    {
+        activate_regular_files (parameters);
+    }
 }
 
 static void
@@ -2110,10 +2154,11 @@ activation_mountable_mounted (NautilusFile *file,
                                      GTK_WIDGET (parameters->parent_window));
         }
 
-        if (error->code == G_IO_ERROR_CANCELLED)
+        if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
         {
-            activation_parameters_free (parameters);
-            return;
+            /* Abort the whole activation, including pending starts. */
+            g_cancellable_cancel (parameters->cancellable);
+            g_clear_list (&parameters->mountables, (GDestroyNotify) nautilus_file_unref);
         }
     }
 
@@ -2144,10 +2189,7 @@ activation_mount_mountables (ActivateParameters *parameters)
         return;
     }
 
-    if (parameters->mountables == NULL && parameters->start_mountables == NULL)
-    {
-        activate_regular_files (parameters);
-    }
+    activation_mountables_done (parameters);
 }
 
 
@@ -2200,10 +2242,11 @@ activation_mountable_started (NautilusFile *file,
                                      GTK_WIDGET (parameters->parent_window));
         }
 
-        if (error->code == G_IO_ERROR_CANCELLED)
+        if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
         {
-            activation_parameters_free (parameters);
-            return;
+            /* Abort the whole activation, including pending mounts. */
+            g_cancellable_cancel (parameters->cancellable);
+            g_clear_list (&parameters->start_mountables, (GDestroyNotify) nautilus_file_unref);
         }
     }
 
@@ -2232,10 +2275,7 @@ activation_start_mountables (ActivateParameters *parameters)
         return;
     }
 
-    if (parameters->mountables == NULL && parameters->start_mountables == NULL)
-    {
-        activate_regular_files (parameters);
-    }
+    activation_mountables_done (parameters);
 }
 
 /**
