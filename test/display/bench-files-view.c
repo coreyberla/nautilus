@@ -9,6 +9,8 @@
  *               window and measure how long the visible thumbnails take
  * BENCH_SORT    sort order for BENCH_IMAGES, as in the default-sort-order
  *               setting (default "mtime")
+ * BENCH_ZOOM    grid zoom level for BENCH_IMAGES, e.g. "small"
+ * BENCH_WIDTH   window width for BENCH_IMAGES (default 1280)
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -174,15 +176,31 @@ typedef struct
     guint thumbnail;
     guint loading;
     guint fallback;
+    guint widgets;
     GFile *first_source;
+    GHashTable *columns;
 } ImageStats;
 
 static void
 collect_image_stats (GtkWidget  *widget,
                      ImageStats *stats)
 {
+    if (NAUTILUS_IS_IMAGE (widget))
+    {
+        stats->widgets++;
+    }
+
     if (NAUTILUS_IS_IMAGE (widget) && gtk_widget_get_mapped (widget))
     {
+        graphene_point_t point;
+
+        if (stats->columns != NULL &&
+            gtk_widget_compute_point (widget, GTK_WIDGET (gtk_widget_get_root (widget)),
+                                      &GRAPHENE_POINT_INIT (0, 0), &point))
+        {
+            g_hash_table_add (stats->columns, GINT_TO_POINTER ((int) point.x));
+        }
+
         if (stats->first_source == NULL)
         {
             stats->first_source = nautilus_image_get_source (NAUTILUS_IMAGE (widget));
@@ -262,9 +280,14 @@ measure_thumbnails (const char *label,
         g_usleep (1000);
     }
 
-    g_print ("%-16s %8.1f ms  (main thread CPU %.1f ms; %u visible: %u thumbnails, %u fallback, %u loading; %u thumbnails on disk)\n",
+    g_autoptr (GHashTable) columns = g_hash_table_new (NULL, NULL);
+    stats = (ImageStats) { .columns = columns };
+    collect_image_stats (window, &stats);
+
+    g_print ("%-16s %8.1f ms  (main thread CPU %.1f ms; %u visible of %u image widgets in %u columns: %u thumbnails, %u fallback, %u loading; %u thumbnails on disk)\n",
              label, ms_since (start), cpu_ms () - cpu_start,
-             stats.total, stats.thumbnail, stats.fallback, stats.loading,
+             stats.total, stats.widgets, g_hash_table_size (columns),
+             stats.thumbnail, stats.fallback, stats.loading,
              count_cached_thumbnails ());
 
     return stats.first_source != NULL ? g_object_ref (stats.first_source) : NULL;
@@ -313,6 +336,13 @@ run_image_benchmark (guint n_images)
         make_image_file_with_mtime (location, 1000000000 + (i * 7919) % n_images, FALSE);
     }
 
+    if (g_getenv ("BENCH_ZOOM") != NULL)
+    {
+        g_assert_true (g_settings_set_string (nautilus_icon_view_preferences,
+                                              NAUTILUS_PREFERENCES_ICON_VIEW_DEFAULT_ZOOM_LEVEL,
+                                              g_getenv ("BENCH_ZOOM")));
+    }
+
     const char *sort = g_getenv ("BENCH_SORT") != NULL ? g_getenv ("BENCH_SORT") : "mtime";
     g_assert_true (g_settings_set_string (nautilus_preferences,
                                           NAUTILUS_PREFERENCES_DEFAULT_SORT_ORDER, sort));
@@ -320,7 +350,7 @@ run_image_benchmark (guint n_images)
 
     NautilusWindowSlot *slot = nautilus_window_slot_new (NAUTILUS_MODE_BROWSE);
     GtkWidget *window = gtk_window_new ();
-    gtk_window_set_default_size (GTK_WINDOW (window), 1280, 800);
+    gtk_window_set_default_size (GTK_WINDOW (window), env_uint ("BENCH_WIDTH", 1280), 800);
     gtk_window_set_child (GTK_WINDOW (window), GTK_WIDGET (slot));
     gtk_window_present (GTK_WINDOW (window));
 
@@ -374,8 +404,23 @@ run_image_benchmark (guint n_images)
     start = g_get_monotonic_time ();
     nautilus_files_view_set_location (view, images_location);
     ITERATE_WHILE (nautilus_files_view_get_loading (view));
+    g_print ("cached loaded:   %8.1f ms\n", ms_since (start));
     g_clear_object (&first_shown);
     first_shown = measure_thumbnails ("thumbs cached:", window, start, NULL);
+
+    /* 4. Revisit again, now that everything shown before is thumbnailed. */
+    for (guint i = 0; i < MAX (env_uint ("BENCH_REVISITS", 1), 1); i++)
+    {
+        nautilus_files_view_set_location (view, home);
+        ITERATE_WHILE (nautilus_files_view_get_loading (view));
+        iterate_until_quiet (200, 10000);
+        start = g_get_monotonic_time ();
+        nautilus_files_view_set_location (view, images_location);
+        ITERATE_WHILE (nautilus_files_view_get_loading (view));
+        g_print ("revisit loaded:  %8.1f ms\n", ms_since (start));
+        g_clear_object (&first_shown);
+        first_shown = measure_thumbnails ("thumbs revisit:", window, start, NULL);
+    }
 
     gtk_window_destroy (GTK_WINDOW (window));
     test_clear_tmp_dir ();
