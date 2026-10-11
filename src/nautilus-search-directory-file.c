@@ -267,6 +267,11 @@ nautilus_search_directory_file_init (NautilusSearchDirectoryFile *search_file)
     file->details->directory_count_is_up_to_date = TRUE;
 
     nautilus_file_set_display_name (file, _("Search"), NULL, TRUE);
+
+    /* Load metadata saved by previous searches */
+    nautilus_keyfile_metadata_update_from_keyfile (file,
+                                                   search_file->metadata_filename,
+                                                   "directory");
 }
 
 static void
