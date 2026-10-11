@@ -178,10 +178,17 @@ nautilus_keyfile_metadata_set_string (NautilusFile *file,
 
     keyfile = get_keyfile (keyfile_filename);
 
-    g_key_file_set_string (keyfile,
-                           name,
-                           key,
-                           string);
+    if (string == NULL)
+    {
+        g_key_file_remove_key (keyfile, name, key, NULL);
+    }
+    else
+    {
+        g_key_file_set_string (keyfile,
+                               name,
+                               key,
+                               string);
+    }
 
     save_in_idle (keyfile_filename);
 
@@ -206,6 +213,19 @@ nautilus_keyfile_metadata_set_stringv (NautilusFile       *file,
     gboolean free_strv = FALSE;
 
     keyfile = get_keyfile (keyfile_filename);
+
+    if (stringv == NULL)
+    {
+        g_key_file_remove_key (keyfile, name, key, NULL);
+        save_in_idle (keyfile_filename);
+
+        if (nautilus_keyfile_metadata_update_from_keyfile (file, keyfile_filename, name))
+        {
+            nautilus_file_changed (file);
+        }
+
+        return;
+    }
 
     /* if we would be setting a single-length strv, append a fake
      * terminator to the array, to be able to differentiate it later from
