@@ -11,6 +11,7 @@
 
 #include <glib/gstdio.h>
 #include <sys/resource.h>
+#include <unistd.h>
 #include <test-utilities.h>
 
 #include <nautilus-application.h>
@@ -118,6 +119,7 @@ main (int   argc,
     Timer end_changes = { 0 };
     guint changed = 0;
     gint64 start;
+    double cpu_start;
 
     gtk_init ();
     g_log_set_debug_enabled (FALSE);
@@ -171,7 +173,7 @@ main (int   argc,
     end_changes = (Timer) { 0 };
     changed = 0;
     start = g_get_monotonic_time ();
-    double cpu_start = cpu_ms ();
+    cpu_start = cpu_ms ();
     iterate_until_quiet (3000, 120000);
     g_print ("settle:          %8.1f ms  (main thread CPU %.1f ms, %u file-changed, end-file-changes %.1f ms in %u calls)\n",
              ms_since (start) - 3000, cpu_ms () - cpu_start, changed, end_changes.total / 1000.0, end_changes.count);
@@ -212,6 +214,25 @@ main (int   argc,
     ITERATE_WHILE (nautilus_files_view_get_loading (view));
     g_print ("revisit:         %8.1f ms  (end-file-changes %.1f ms in %u calls)\n",
              ms_since (start), end_changes.total / 1000.0, end_changes.count);
+
+    /* 6. Refresh (F5): everything gets refetched. */
+    g_printerr ("REFRESH-START %d\n", getpid ());
+    iterate_until_quiet (1000, 120000);
+    end_changes = (Timer) { 0 };
+    changed = 0;
+    start = g_get_monotonic_time ();
+    cpu_start = cpu_ms ();
+    /* Same as the slot's reload action. */
+    g_autoptr (NautilusFile) directory_as_file = nautilus_file_get (tmp_location);
+    nautilus_file_invalidate_all_attributes (directory_as_file);
+    nautilus_directory_force_reload (cached);
+    nautilus_files_view_set_location (view, tmp_location);
+    ITERATE_WHILE (nautilus_files_view_get_loading (view));
+    double load_ms = ms_since (start);
+    iterate_until_quiet (3000, 120000);
+    g_print ("refresh:         %8.1f ms  (settled after %.1f ms, main thread CPU %.1f ms, %u file-changed, end-file-changes %.1f ms in %u calls)\n",
+             load_ms, ms_since (start) - 3000, cpu_ms () - cpu_start, changed,
+             end_changes.total / 1000.0, end_changes.count);
 
     test_clear_tmp_dir ();
 
