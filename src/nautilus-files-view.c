@@ -553,6 +553,12 @@ on_sort_action_state_changed (GActionGroup *action_group,
     const gchar *target_name;
     gboolean reversed;
 
+    /* Search always opens sorted by relevance, so don't remember the sort */
+    if (nautilus_file_is_in_search (self->directory_as_file))
+    {
+        return;
+    }
+
     g_variant_get (value, "(&sb)", &target_name, &reversed);
 
     nautilus_file_set_metadata (self->directory_as_file,
