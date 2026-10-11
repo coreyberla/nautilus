@@ -222,9 +222,16 @@ on_recent_servers_loading_changed (GObject    *object,
 
         on_backend_directory_done_loading (self_as_directory, self);
 
-        for (GList *l = self->callback_list; l != NULL; l = l->next)
+        /* Ready callbacks are removed from the list and freed when invoked,
+         * and they may cancel others, so iterate over a copy. */
+        g_autoptr (GList) callbacks = g_list_copy (self->callback_list);
+
+        for (GList *l = callbacks; l != NULL; l = l->next)
         {
-            on_backend_directory_ready (self_as_directory, NULL, l->data);
+            if (g_list_find (self->callback_list, l->data) != NULL)
+            {
+                on_backend_directory_ready (self_as_directory, NULL, l->data);
+            }
         }
     }
 }
@@ -523,7 +530,17 @@ nautilus_network_directory_dispose (GObject *object)
     NautilusNetworkDirectory *self = NAUTILUS_NETWORK_DIRECTORY (object);
 
     g_clear_list (&self->recent_server_files, g_object_unref);
-    g_clear_list (&self->callback_list, g_free);
+
+    /* Unregister pending callbacks from the backend directories, which may
+     * outlive this one, before freeing them. */
+    while (self->callback_list != NULL)
+    {
+        NetworkCallback *network_callback = self->callback_list->data;
+
+        real_cancel_callback (NAUTILUS_DIRECTORY (self),
+                              network_callback->callback,
+                              network_callback->callback_data);
+    }
 
     G_OBJECT_CLASS (nautilus_network_directory_parent_class)->dispose (object);
 }
