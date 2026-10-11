@@ -217,6 +217,21 @@ collect_image_stats (GtkWidget  *widget,
     }
 }
 
+static guint
+count_cached_thumbnails (void)
+{
+    g_autofree char *dir = g_build_filename (g_get_user_cache_dir (), "thumbnails", "large", NULL);
+    g_autoptr (GDir) handle = g_dir_open (dir, 0, NULL);
+    guint count = 0;
+
+    while (handle != NULL && g_dir_read_name (handle) != NULL)
+    {
+        count++;
+    }
+
+    return count;
+}
+
 /* Iterate until every visible image is done loading, and report it. If
  * previous_first is given, also wait until other items are shown. */
 static GFile *
@@ -245,9 +260,10 @@ measure_thumbnails (const char *label,
         g_usleep (1000);
     }
 
-    g_print ("%-16s %8.1f ms  (main thread CPU %.1f ms; %u visible: %u thumbnails, %u fallback, %u loading)\n",
+    g_print ("%-16s %8.1f ms  (main thread CPU %.1f ms; %u visible: %u thumbnails, %u fallback, %u loading; %u thumbnails on disk)\n",
              label, ms_since (start), cpu_ms () - cpu_start,
-             stats.total, stats.thumbnail, stats.fallback, stats.loading);
+             stats.total, stats.thumbnail, stats.fallback, stats.loading,
+             count_cached_thumbnails ());
 
     return stats.first_source != NULL ? g_object_ref (stats.first_source) : NULL;
 }
@@ -290,7 +306,8 @@ run_image_benchmark (guint n_images)
         g_autofree char *name = g_strdup_printf ("image_%05u.png", i);
         g_autoptr (GFile) location = g_file_get_child (images_location, name);
 
-        make_image_file (location, FALSE);
+        /* An old mtime, as files modified in the last seconds aren't thumbnailed yet. */
+        make_image_file_with_mtime (location, 1000000000, FALSE);
     }
 
     NautilusWindowSlot *slot = nautilus_window_slot_new (NAUTILUS_MODE_BROWSE);
