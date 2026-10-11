@@ -58,7 +58,14 @@ static void
 undo_redo_on_finished (gpointer user_data)
 {
     NautilusFileUndoManager *undo_manager = NULL;
-    int *handler_id = (int *) user_data;
+    gulong *handler_id = (gulong *) user_data;
+
+    /* "undo-changed" is also emitted synchronously when the operation
+     * starts, so wait for the one emitted once it completes. */
+    if (nautilus_file_undo_manager_is_operating ())
+    {
+        return;
+    }
 
     undo_manager = nautilus_file_undo_manager_get ();
     g_signal_handler_disconnect (undo_manager, *handler_id);
@@ -70,7 +77,7 @@ static void
 handle_redo_internal (NautilusFileOperationsDBusData *dbus_data)
 {
     NautilusFileUndoManager *undo_manager = NULL;
-    gint *handler_id = g_new0 (int, 1);
+    gulong *handler_id = g_new0 (gulong, 1);
 
     g_application_hold (g_application_get_default ());
 
@@ -88,6 +95,15 @@ handle_redo2 (NautilusDBusFileOperations2 *object,
 {
     g_autoptr (NautilusFileOperationsDBusData) dbus_data = NULL;
 
+    if (nautilus_file_undo_manager_get_state () != NAUTILUS_FILE_UNDO_MANAGER_STATE_REDO)
+    {
+        g_dbus_method_invocation_return_error_literal (invocation,
+                                                       G_DBUS_ERROR,
+                                                       G_DBUS_ERROR_FAILED,
+                                                       "Nothing to redo");
+        return TRUE; /* invocation was handled */
+    }
+
     dbus_data = nautilus_file_operations_dbus_data_new (platform_data);
 
     handle_redo_internal (dbus_data);
@@ -100,7 +116,7 @@ static void
 handle_undo_internal (NautilusFileOperationsDBusData *dbus_data)
 {
     NautilusFileUndoManager *undo_manager = NULL;
-    gint *handler_id = g_new0 (int, 1);
+    gulong *handler_id = g_new0 (gulong, 1);
 
     g_application_hold (g_application_get_default ());
 
@@ -117,6 +133,15 @@ handle_undo2 (NautilusDBusFileOperations2 *object,
               GVariant                    *platform_data)
 {
     g_autoptr (NautilusFileOperationsDBusData) dbus_data = NULL;
+
+    if (nautilus_file_undo_manager_get_state () != NAUTILUS_FILE_UNDO_MANAGER_STATE_UNDO)
+    {
+        g_dbus_method_invocation_return_error_literal (invocation,
+                                                       G_DBUS_ERROR,
+                                                       G_DBUS_ERROR_FAILED,
+                                                       "Nothing to undo");
+        return TRUE; /* invocation was handled */
+    }
 
     dbus_data = nautilus_file_operations_dbus_data_new (platform_data);
 
@@ -200,6 +225,15 @@ handle_copy_uris2 (NautilusDBusFileOperations2  *object,
 {
     g_autoptr (NautilusFileOperationsDBusData) dbus_data = NULL;
 
+    if (sources[0] == NULL)
+    {
+        g_dbus_method_invocation_return_error_literal (invocation,
+                                                       G_DBUS_ERROR,
+                                                       G_DBUS_ERROR_INVALID_ARGS,
+                                                       "No URIs given");
+        return TRUE; /* invocation was handled */
+    }
+
     dbus_data = nautilus_file_operations_dbus_data_new (platform_data);
 
     handle_copy_uris_internal (sources, destination, dbus_data);
@@ -238,11 +272,20 @@ handle_move_uris2 (NautilusDBusFileOperations2  *object,
 {
     g_autoptr (NautilusFileOperationsDBusData) dbus_data = NULL;
 
+    if (sources[0] == NULL)
+    {
+        g_dbus_method_invocation_return_error_literal (invocation,
+                                                       G_DBUS_ERROR,
+                                                       G_DBUS_ERROR_INVALID_ARGS,
+                                                       "No URIs given");
+        return TRUE; /* invocation was handled */
+    }
+
     dbus_data = nautilus_file_operations_dbus_data_new (platform_data);
 
     handle_move_uris_internal (sources, destination, dbus_data);
 
-    nautilus_dbus_file_operations2_complete_copy_uris (object, invocation);
+    nautilus_dbus_file_operations2_complete_move_uris (object, invocation);
     return TRUE; /* invocation was handled */
 }
 
@@ -305,6 +348,15 @@ handle_trash_uris2 (NautilusDBusFileOperations2  *object,
 {
     g_autoptr (NautilusFileOperationsDBusData) dbus_data = NULL;
 
+    if (uris[0] == NULL)
+    {
+        g_dbus_method_invocation_return_error_literal (invocation,
+                                                       G_DBUS_ERROR,
+                                                       G_DBUS_ERROR_INVALID_ARGS,
+                                                       "No URIs given");
+        return TRUE; /* invocation was handled */
+    }
+
     dbus_data = nautilus_file_operations_dbus_data_new (platform_data);
 
     handle_trash_uris_internal (uris, dbus_data);
@@ -347,6 +399,15 @@ handle_delete_uris2 (NautilusDBusFileOperations2  *object,
                      GVariant                     *platform_data)
 {
     g_autoptr (NautilusFileOperationsDBusData) dbus_data = NULL;
+
+    if (uris[0] == NULL)
+    {
+        g_dbus_method_invocation_return_error_literal (invocation,
+                                                       G_DBUS_ERROR,
+                                                       G_DBUS_ERROR_INVALID_ARGS,
+                                                       "No URIs given");
+        return TRUE; /* invocation was handled */
+    }
 
     dbus_data = nautilus_file_operations_dbus_data_new (platform_data);
 

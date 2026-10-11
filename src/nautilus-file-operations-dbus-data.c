@@ -29,12 +29,10 @@ NautilusFileOperationsDBusData *
 nautilus_file_operations_dbus_data_new (GVariant *platform_data)
 {
     NautilusFileOperationsDBusData *self;
-    GVariantDict dict;
+    g_auto (GVariantDict) dict = G_VARIANT_DICT_INIT (platform_data);
 
     self = g_new0 (NautilusFileOperationsDBusData, 1);
     g_atomic_ref_count_init (&self->ref_count);
-
-    g_variant_dict_init (&dict, platform_data);
 
     g_variant_dict_lookup (&dict, "parent-handle", "s", &self->parent_handle);
 

@@ -6505,6 +6505,11 @@ nautilus_file_operations_copy_move (const GList                    *item_uris,
         nautilus_tag_manager_star_files (nautilus_tag_manager_get (),
                                          G_OBJECT (parent_view),
                                          source_file_list, NULL, NULL, NULL);
+
+        if (done_callback != NULL)
+        {
+            done_callback (NULL, TRUE, done_callback_data);
+        }
     }
     else if (copy_action == GDK_ACTION_COPY)
     {
