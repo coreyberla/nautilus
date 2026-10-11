@@ -1266,6 +1266,90 @@ test_load_dir (void)
 }
 
 static void
+collect_visible_labels (GtkWidget *widget,
+                        GString   *texts)
+{
+    if (GTK_IS_LABEL (widget) && gtk_widget_get_mapped (widget))
+    {
+        g_string_append_printf (texts, "[%s]", gtk_label_get_text (GTK_LABEL (widget)));
+    }
+
+    for (GtkWidget *child = gtk_widget_get_first_child (widget);
+         child != NULL;
+         child = gtk_widget_get_next_sibling (child))
+    {
+        collect_visible_labels (child, texts);
+    }
+}
+
+static gboolean
+has_visible_label_with_text (GtkWidget  *widget,
+                             const char *text)
+{
+    g_autoptr (GString) texts = g_string_new (NULL);
+    g_autofree char *needle = g_strdup_printf ("[%s]", text);
+
+    collect_visible_labels (widget, texts);
+
+    return strstr (texts->str, needle) != NULL;
+}
+
+static void
+test_search_list_view_shows_path (void)
+{
+    const GStrv test_hierarchy = (char *[]) {
+        "subdir/",
+        "subdir/my_nested_file",
+        NULL
+    };
+    g_autoptr (NautilusWindowSlot) slot = NULL;
+    g_autoptr (NautilusFilesView) files_view = create_view_with_slot (NAUTILUS_MODE_BROWSE,
+                                                                      NAUTILUS_VIEW_LIST_ID,
+                                                                      &slot);
+    g_autoptr (GFile) tmp_location = g_file_new_for_path (test_get_tmp_dir ());
+    g_autoptr (NautilusQuery) search_query = nautilus_query_new ();
+    GtkWidget *window = gtk_window_new ();
+
+    file_hierarchy_create (test_hierarchy, "");
+
+    /* Rows are only created for a view that is shown. Keep our own reference
+     * to the slot, as the window would otherwise take over the floating one. */
+    g_object_ref_sink (slot);
+    gtk_window_set_child (GTK_WINDOW (window), GTK_WIDGET (slot));
+    gtk_window_present (GTK_WINDOW (window));
+
+    nautilus_files_view_set_location (files_view, tmp_location);
+    ITER_CONTEXT_WHILE (nautilus_files_view_get_loading (files_view));
+
+    g_assert_false (has_visible_label_with_text (window, "subdir/my_nested_file"));
+
+    nautilus_query_set_text (search_query, "my_nested_file");
+    nautilus_query_set_location (search_query, tmp_location);
+    nautilus_files_view_set_search_query (files_view, search_query);
+    ITER_CONTEXT_WHILE (nautilus_files_view_get_loading (files_view));
+
+    /* The result shows its name and, below it, the folder it's in. */
+    gint64 deadline = g_get_monotonic_time () + 30 * G_USEC_PER_SEC;
+    while (!has_visible_label_with_text (window, "my_nested_file") ||
+           !has_visible_label_with_text (window, "subdir/"))
+    {
+        if (g_get_monotonic_time () > deadline)
+        {
+            g_autoptr (GString) texts = g_string_new (NULL);
+
+            collect_visible_labels (window, texts);
+            g_error ("Search result path not shown. Visible labels: %s", texts->str);
+        }
+        g_main_context_iteration (NULL, FALSE);
+        g_usleep (1000);
+    }
+
+    gtk_window_set_child (GTK_WINDOW (window), NULL);
+    gtk_window_destroy (GTK_WINDOW (window));
+    test_clear_tmp_dir ();
+}
+
+static void
 test_load_dir_images (void)
 {
     g_autoptr (NautilusWindowSlot) slot = NULL;
@@ -1351,6 +1435,8 @@ main (int   argc,
                      test_hidden_files_change);
     g_test_add_func ("/view/hidden_files/rename_files",
                      test_hidden_files_renamed);
+    g_test_add_func ("/view/search/list_view_path",
+                     test_search_list_view_shows_path);
     g_test_add_func ("/view/selection/actions",
                      test_selection_actions);
     g_test_add_func ("/view/selection/in_search",
