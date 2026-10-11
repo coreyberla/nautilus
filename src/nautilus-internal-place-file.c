@@ -12,6 +12,8 @@
 #include <gio/gio.h>
 
 #include "nautilus-file-private.h"
+#include "nautilus-file-utilities.h"
+#include "nautilus-keyfile-metadata.h"
 #include "nautilus-scheme.h"
 #include "nautilus-network-directory.h"
 #include "nautilus-starred-directory.h"
@@ -22,6 +24,9 @@ struct _NautilusInternalPlaceFile
 
     GList *callbacks;
     GCancellable *network_mount_cancellable;
+
+    /* Only set for places whose metadata is saved */
+    char *metadata_filename;
 };
 
 G_DEFINE_FINAL_TYPE (NautilusInternalPlaceFile, nautilus_internal_place_file, NAUTILUS_TYPE_FILE);
@@ -146,6 +151,38 @@ real_check_if_ready (NautilusFile       *file,
 }
 
 static void
+real_set_metadata (NautilusFile *file,
+                   const char   *key,
+                   const char   *value)
+{
+    NautilusInternalPlaceFile *self = NAUTILUS_INTERNAL_PLACE_FILE (file);
+
+    if (self->metadata_filename == NULL)
+    {
+        return;
+    }
+
+    nautilus_keyfile_metadata_set_string (file, self->metadata_filename,
+                                          "directory", key, value);
+}
+
+static void
+real_set_metadata_as_list (NautilusFile  *file,
+                           const char    *key,
+                           char         **value)
+{
+    NautilusInternalPlaceFile *self = NAUTILUS_INTERNAL_PLACE_FILE (file);
+
+    if (self->metadata_filename == NULL)
+    {
+        return;
+    }
+
+    nautilus_keyfile_metadata_set_stringv (file, self->metadata_filename,
+                                           "directory", key, (const char **) value);
+}
+
+static void
 nautilus_internal_place_file_init (NautilusInternalPlaceFile *self)
 {
 }
@@ -168,10 +205,20 @@ nautilus_internal_place_file_constructed (GObject *object)
     else if (NAUTILUS_IS_STARRED_DIRECTORY (file->details->directory))
     {
         nautilus_file_set_display_name (file, _("Starred"), NULL, TRUE);
+
+        g_autofree char *user_dir = nautilus_get_user_directory ();
+        self->metadata_filename = g_build_filename (user_dir, "starred-metadata", NULL);
     }
 
     file->details->got_file_info = TRUE;
     file->details->file_info_is_up_to_date = TRUE;
+
+    if (self->metadata_filename != NULL)
+    {
+        /* Load metadata saved by previous sessions */
+        nautilus_keyfile_metadata_update_from_keyfile (file, self->metadata_filename,
+                                                       "directory");
+    }
 }
 
 static void
@@ -187,6 +234,16 @@ nautilus_internal_place_file_dispose (GObject *object)
 }
 
 static void
+nautilus_internal_place_file_finalize (GObject *object)
+{
+    NautilusInternalPlaceFile *self = NAUTILUS_INTERNAL_PLACE_FILE (object);
+
+    g_free (self->metadata_filename);
+
+    G_OBJECT_CLASS (nautilus_internal_place_file_parent_class)->finalize (object);
+}
+
+static void
 nautilus_internal_place_file_class_init (NautilusInternalPlaceFileClass *klass)
 {
     GObjectClass *object_class = G_OBJECT_CLASS (klass);
@@ -195,6 +252,7 @@ nautilus_internal_place_file_class_init (NautilusInternalPlaceFileClass *klass)
     /* We need to know the parent directory, which is a construction property.*/
     object_class->constructed = nautilus_internal_place_file_constructed;
     object_class->dispose = nautilus_internal_place_file_dispose;
+    object_class->finalize = nautilus_internal_place_file_finalize;
 
     file_class->default_file_type = G_FILE_TYPE_DIRECTORY;
 
@@ -203,4 +261,6 @@ nautilus_internal_place_file_class_init (NautilusInternalPlaceFileClass *klass)
     file_class->call_when_ready = real_call_when_ready;
     file_class->cancel_call_when_ready = real_cancel_call_when_ready;
     file_class->check_if_ready = real_check_if_ready;
+    file_class->set_metadata = real_set_metadata;
+    file_class->set_metadata_as_list = real_set_metadata_as_list;
 }
