@@ -7660,6 +7660,8 @@ extract_job_on_error (AutoarExtractor *extractor,
 
     source_file = autoar_extractor_get_source_file (extractor);
 
+    extract_job->extraction_failed = TRUE;
+
     if (IS_IO_ERROR (error, NOT_SUPPORTED))
     {
         handle_unsupported_compressed_file (extract_job->common.parent_window,
@@ -7667,8 +7669,6 @@ extract_job_on_error (AutoarExtractor *extractor,
 
         return;
     }
-
-    extract_job->extraction_failed = TRUE;
 
     /* It is safe to use extract_job->output_files->data only when the
      * extract_job->destination_decided variable was set, see comment in the
