@@ -7,6 +7,8 @@
  *
  * BENCH_IMAGES  if set, instead show a folder with this many images in a
  *               window and measure how long the visible thumbnails take
+ * BENCH_SORT    sort order for BENCH_IMAGES, as in the default-sort-order
+ *               setting (default "mtime")
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -306,9 +308,15 @@ run_image_benchmark (guint n_images)
         g_autofree char *name = g_strdup_printf ("image_%05u.png", i);
         g_autoptr (GFile) location = g_file_get_child (images_location, name);
 
-        /* An old mtime, as files modified in the last seconds aren't thumbnailed yet. */
-        make_image_file_with_mtime (location, 1000000000, FALSE);
+        /* Old mtimes, as files modified in the last seconds aren't thumbnailed
+         * yet. They're distinct and in a different order than the names. */
+        make_image_file_with_mtime (location, 1000000000 + (i * 7919) % n_images, FALSE);
     }
+
+    const char *sort = g_getenv ("BENCH_SORT") != NULL ? g_getenv ("BENCH_SORT") : "mtime";
+    g_assert_true (g_settings_set_string (nautilus_preferences,
+                                          NAUTILUS_PREFERENCES_DEFAULT_SORT_ORDER, sort));
+    g_print ("images sorted by %s\n", sort);
 
     NautilusWindowSlot *slot = nautilus_window_slot_new (NAUTILUS_MODE_BROWSE);
     GtkWidget *window = gtk_window_new ();
@@ -332,6 +340,22 @@ run_image_benchmark (guint n_images)
     nautilus_files_view_set_location (view, images_location);
     ITERATE_WHILE (nautilus_files_view_get_loading (view));
     g_print ("images loaded:   %8.1f ms  (%u images)\n", ms_since (start), n_images);
+    {
+        NautilusViewModel *model = nautilus_files_view_get_private_model (view);
+        g_autoptr (GString) first = g_string_new (NULL);
+
+        for (guint i = 0; i < MIN (3, g_list_model_get_n_items (G_LIST_MODEL (model))); i++)
+        {
+            g_autoptr (GtkTreeListRow) row = g_list_model_get_item (G_LIST_MODEL (model), i);
+            g_autoptr (NautilusViewItem) item = gtk_tree_list_row_get_item (row);
+            NautilusFile *file = nautilus_view_item_get_file (item);
+
+            g_string_append_printf (first, " %s (mtime %" G_GINT64_FORMAT ")",
+                                    nautilus_file_get_name (file),
+                                    (gint64) nautilus_file_get_mtime (file));
+        }
+        g_print ("first items:    %s\n", first->str);
+    }
     g_autoptr (GFile) first_shown = measure_thumbnails ("thumbs cold:", window, start, NULL);
 
     /* 2. Scroll to the end, where thumbnails aren't cached either. */
