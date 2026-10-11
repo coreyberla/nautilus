@@ -68,12 +68,16 @@ _check_file (GFile      *mount_root,
 
     file = g_file_get_child (mount_root, file_path);
     file_info = g_file_query_info (file,
+                                   G_FILE_ATTRIBUTE_STANDARD_TYPE ","
                                    G_FILE_ATTRIBUTE_ACCESS_CAN_EXECUTE,
-                                   G_FILE_QUERY_INFO_NONE,
+                                   G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS,
                                    NULL,
                                    NULL);
 
-    if (file_info == NULL)
+    /* Only run programs that are actually on the medium; a symbolic link
+     * could point at any program on the system. */
+    if (file_info == NULL ||
+        g_file_info_get_file_type (file_info) != G_FILE_TYPE_REGULAR)
     {
         return FALSE;
     }
