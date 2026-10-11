@@ -4176,15 +4176,20 @@ copy_move_directory (CopyMoveJob   *copy_job,
             while (!job_aborted (job) &&
                    (info = g_file_enumerator_next_file (enumerator, job->cancellable, skip_error ? NULL : &error)) != NULL)
             {
+                gboolean child_skipped;
+
                 src_file = g_file_get_child (src,
                                              g_file_info_get_name (info));
-                local_skipped_file = !copy_move_file (copy_job, src_file, *dest, same_fs, FALSE,
-                                                      NULL,
-                                                      &dest_fs_type, source_info, transfer_info,
-                                                      NULL, FALSE, reset_perms);
+                child_skipped = !copy_move_file (copy_job, src_file, *dest, same_fs, FALSE,
+                                                 NULL,
+                                                 &dest_fs_type, source_info, transfer_info,
+                                                 NULL, FALSE, reset_perms);
 
-                if (local_skipped_file)
+                if (child_skipped)
                 {
+                    /* Remember any skipped child, not just the last one, so
+                     * that the source folder isn't removed on move. */
+                    local_skipped_file = TRUE;
                     source_info_remove_file_from_count (src_file, job, source_info);
                     report_copy_progress (copy_job, source_info, transfer_info);
                 }
@@ -4365,6 +4370,13 @@ copy_move_directory (CopyMoveJob   *copy_job,
                                               source_info->num_files > transfer_info->num_files);
             *skipped_file = !skip;
         }
+    }
+
+    if (copy_job->is_move && local_skipped_file)
+    {
+        /* The source folder is kept because of the skipped children, so
+         * report it as skipped to the parent folder, which must be kept too. */
+        *skipped_file = TRUE;
     }
 
     return TRUE;
