@@ -1287,10 +1287,11 @@ delete_file_recursively (GFile          *file,
 
                 child = g_file_enumerator_get_child (enumerator, info);
 
-                success = success && delete_file_recursively (child,
-                                                              cancellable,
-                                                              callback,
-                                                              callback_data);
+                /* Keep deleting the remaining children even if one failed. */
+                success = delete_file_recursively (child,
+                                                   cancellable,
+                                                   callback,
+                                                   callback_data) && success;
 
                 g_object_unref (info);
 
