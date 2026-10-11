@@ -161,6 +161,9 @@ struct _NautilusFilesView
     gboolean begin_loading_delayed;
 
     guint display_pending_source_id;
+    gint64 load_start_time;
+    guint content_types_timeout_id;
+    gboolean waiting_for_content_types;
     guint changes_timeout_id;
 
     guint update_interval;
@@ -4669,17 +4672,91 @@ files_changed_callback (NautilusDirectory *directory,
     schedule_update_status (view);
 }
 
+/* How long to wait, since loading started, for content types sniffed from
+ * file contents before showing files with the ones guessed from their names. */
+#define CONTENT_TYPES_GRACE_MS 100
+
+static void content_types_ready_callback (NautilusDirectory *directory,
+                                          GList             *files,
+                                          gpointer           callback_data);
+
+static void
+stop_waiting_for_content_types (NautilusFilesView *self)
+{
+    g_clear_handle_id (&self->content_types_timeout_id, g_source_remove);
+
+    if (self->waiting_for_content_types)
+    {
+        self->waiting_for_content_types = FALSE;
+        nautilus_directory_cancel_callback (self->directory, content_types_ready_callback, self);
+    }
+}
+
+static void
+finish_done_loading (NautilusFilesView *self)
+{
+    stop_waiting_for_content_types (self);
+
+    display_pending_files_with_tradeoff (self);
+
+    remove_loading_floating_bar (self);
+}
+
+static void
+content_types_ready_callback (NautilusDirectory *directory,
+                              GList             *files,
+                              gpointer           callback_data)
+{
+    NautilusFilesView *self = NAUTILUS_FILES_VIEW (callback_data);
+
+    self->waiting_for_content_types = FALSE;
+    finish_done_loading (self);
+}
+
+static void
+content_types_timeout_callback (gpointer user_data)
+{
+    NautilusFilesView *self = NAUTILUS_FILES_VIEW (user_data);
+
+    self->content_types_timeout_id = 0;
+    finish_done_loading (self);
+}
+
 static void
 done_loading_callback (NautilusDirectory *directory,
                        gpointer           callback_data)
 {
     NautilusFilesView *view;
+    gboolean reversed;
+    const char *sort_attribute;
+    gint64 remaining_ms;
 
     view = NAUTILUS_FILES_VIEW (callback_data);
 
-    display_pending_files_with_tradeoff (view);
+    /* Sniffing content types can take long for large folders, so they are
+     * loaded separately. Prefer showing files with them, but don't wait long
+     * unless they determine the order. */
+    sort_attribute = get_directory_sort_by (view->directory_as_file, &reversed);
+    remaining_ms = CONTENT_TYPES_GRACE_MS - (g_get_monotonic_time () - view->load_start_time) / 1000;
 
-    remove_loading_floating_bar (view);
+    stop_waiting_for_content_types (view);
+
+    if (g_strcmp0 (sort_attribute, "type") != 0 && remaining_ms <= 0)
+    {
+        finish_done_loading (view);
+        return;
+    }
+
+    view->waiting_for_content_types = TRUE;
+    nautilus_directory_call_when_ready (directory, NAUTILUS_ATTRIBUTE_CONTENT_TYPE,
+                                        content_types_ready_callback, view);
+
+    if (view->waiting_for_content_types && g_strcmp0 (sort_attribute, "type") != 0)
+    {
+        view->content_types_timeout_id = g_timeout_add_once (remaining_ms,
+                                                             content_types_timeout_callback,
+                                                             view);
+    }
 }
 
 static void
@@ -8508,6 +8585,7 @@ load_directory (NautilusFilesView *self,
     }
 
     g_set_object (&self->directory, directory);
+    self->load_start_time = g_get_monotonic_time ();
 
     g_clear_object (&self->directory_as_file);
     self->directory_as_file = nautilus_directory_get_corresponding_file (directory);
@@ -8689,6 +8767,7 @@ nautilus_files_view_stop_loading (NautilusFilesView *self)
 
     unschedule_display_of_pending_files (self);
     reset_update_interval (self);
+    stop_waiting_for_content_types (self);
 
     /* Free extra undisplayed files */
     g_list_free_full (self->new_added_files, file_and_directory_free);

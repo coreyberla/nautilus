@@ -2401,6 +2401,14 @@ update_info_internal (NautilusFile *file,
         return TRUE;
     }
 
+    /* When the info lacks the content type, e.g. from listing a directory,
+     * keep a previously loaded one unless the file changed. */
+    gboolean has_content_type = g_file_info_has_attribute (info, G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE);
+    gboolean keep_content_type = !has_content_type &&
+                                 file->details->content_type_is_up_to_date &&
+                                 file->details->mtime == (time_t) g_file_info_get_attribute_uint64 (info, G_FILE_ATTRIBUTE_TIME_MODIFIED) &&
+                                 file->details->size == (goffset) g_file_info_get_attribute_uint64 (info, G_FILE_ATTRIBUTE_STANDARD_SIZE);
+
     file->details->file_info_is_up_to_date = TRUE;
 
     /* FIXME bugzilla.gnome.org 42044: Need to let links that
@@ -2726,16 +2734,25 @@ update_info_internal (NautilusFile *file,
         changed = TRUE;
     }
 
-    icon = g_file_info_get_icon (info);
-    if (!g_icon_equal (icon, file->details->icon))
+    if (g_file_info_has_attribute (info, G_FILE_ATTRIBUTE_STANDARD_ICON))
     {
-        changed = TRUE;
-
-        if (file->details->icon)
+        icon = g_file_info_get_icon (info);
+        if (!g_icon_equal (icon, file->details->icon))
         {
-            g_object_unref (file->details->icon);
+            changed = TRUE;
+
+            if (file->details->icon)
+            {
+                g_object_unref (file->details->icon);
+            }
+            file->details->icon = g_object_ref (icon);
         }
-        file->details->icon = g_object_ref (icon);
+    }
+    else if (!keep_content_type && file->details->icon != NULL)
+    {
+        /* It's derived from the content type, see nautilus_file_get_gicon(). */
+        g_clear_object (&file->details->icon);
+        changed = TRUE;
     }
 
     symlink_name = g_file_info_get_attribute_byte_string (info,
@@ -2750,6 +2767,14 @@ update_info_internal (NautilusFile *file,
     if (mime_type == NULL)
     {
         mime_type = g_file_info_get_attribute_string (info, G_FILE_ATTRIBUTE_STANDARD_FAST_CONTENT_TYPE);
+    }
+    if (keep_content_type)
+    {
+        mime_type = file->details->mime_type;
+    }
+    else
+    {
+        file->details->content_type_is_up_to_date = has_content_type;
     }
     if (g_strcmp0 (file->details->mime_type, mime_type) != 0)
     {
@@ -4607,8 +4632,47 @@ nautilus_file_get_gicon (NautilusFile          *file,
     {
         return g_object_ref (file->details->icon);
     }
+    else if (file->details->mime_type != NULL)
+    {
+        /* Not loaded, e.g. when listing a directory. Derive it from the
+         * content type, as GIO does. */
+        file->details->icon = g_content_type_get_icon (file->details->mime_type);
+
+        return g_object_ref (file->details->icon);
+    }
 
     return g_object_ref (nautilus_icon_info_get_default_file_icon ());
+}
+
+/* Sets the content type and icon from info with NAUTILUS_FILE_CONTENT_TYPE_ATTRIBUTES. */
+gboolean
+nautilus_file_update_content_type (NautilusFile *file,
+                                   GFileInfo    *info)
+{
+    const char *mime_type = g_file_info_get_content_type (info);
+    gboolean changed = FALSE;
+
+    file->details->content_type_is_up_to_date = TRUE;
+
+    if (mime_type != NULL && g_strcmp0 (file->details->mime_type, mime_type) != 0)
+    {
+        g_clear_pointer (&file->details->mime_type, g_ref_string_release);
+        file->details->mime_type = g_ref_string_new_intern (mime_type);
+        changed = TRUE;
+    }
+
+    if (g_file_info_has_attribute (info, G_FILE_ATTRIBUTE_STANDARD_ICON))
+    {
+        GIcon *icon = g_file_info_get_icon (info);
+
+        if (!g_icon_equal (icon, file->details->icon))
+        {
+            g_set_object (&file->details->icon, icon);
+            changed = TRUE;
+        }
+    }
+
+    return changed;
 }
 
 const char *

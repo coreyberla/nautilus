@@ -15,6 +15,15 @@
 #define NAUTILUS_FILE_DEFAULT_ATTRIBUTES				\
 	"standard::*,access::*,mountable::*,time::*,unix::*,owner::*,selinux::*,id::filesystem,trash::orig-path,trash::deletion-date,metadata::*,recent::*,preview::icon"
 
+/* Like the default attributes, but without the content type and icons, which
+ * may require reading each file. Used for listing directories, after which
+ * the attributes below are loaded separately. */
+#define NAUTILUS_FILE_LISTING_ATTRIBUTES				\
+	"standard::type,standard::is-hidden,standard::is-backup,standard::is-symlink,standard::is-virtual,standard::is-volatile,standard::name,standard::display-name,standard::edit-name,standard::copy-name,standard::description,standard::fast-content-type,standard::size,standard::allocated-size,standard::symlink-target,standard::target-uri,standard::sort-order,access::*,mountable::*,time::*,unix::*,owner::*,selinux::*,id::filesystem,trash::orig-path,trash::deletion-date,metadata::*,recent::*,preview::icon"
+
+#define NAUTILUS_FILE_CONTENT_TYPE_ATTRIBUTES				\
+	"standard::name,standard::content-type,standard::icon"
+
 /* These are in the typical sort order. Known things come first, then
  * things where we can't know, finally things where we don't yet know.
  */
@@ -123,6 +132,7 @@ struct NautilusFilePrivate
 	guint got_file_info                 : 1;
 	guint get_info_failed               : 1;
 	guint file_info_is_up_to_date       : 1;
+	guint content_type_is_up_to_date    : 1;
 	
 	guint got_directory_count           : 1;
 	guint directory_count_failed        : 1;
@@ -211,6 +221,8 @@ void          nautilus_file_clear_info                     (NautilusFile        
  * new state.  */
 gboolean      nautilus_file_update_info                    (NautilusFile           *file,
 							    GFileInfo              *info);
+gboolean                nautilus_file_update_content_type        (NautilusFile           *file,
+                                                                  GFileInfo              *info);
 gboolean      nautilus_file_update_name                    (NautilusFile           *file,
 							    const char             *name);
 gboolean      nautilus_file_update_thumbnail_info          (NautilusFile           *file,

@@ -849,6 +849,10 @@ dequeue_pending_idle_callback (gpointer callback_data)
 
         /* check if the file already exists */
         file = nautilus_directory_find_file_by_name (directory, name);
+        gboolean notified = FALSE;
+        GFileInfo *content_type_info = directory->details->pending_content_types != NULL
+                                       ? g_hash_table_lookup (directory->details->pending_content_types, name)
+                                       : NULL;
         if (file != NULL)
         {
             /* file already exists in dir, check if we still need to
@@ -864,12 +868,14 @@ dequeue_pending_idle_callback (gpointer callback_data)
                 nautilus_file_ref (file);
                 file->details->is_added = TRUE;
                 added_files = g_list_prepend (added_files, file);
+                notified = TRUE;
             }
             else if (nautilus_file_update_info (file, file_info))
             {
                 /* File changed, notify about the change. */
                 nautilus_file_ref (file);
                 changed_files = g_list_prepend (changed_files, file);
+                notified = TRUE;
             }
         }
         else
@@ -879,6 +885,18 @@ dequeue_pending_idle_callback (gpointer callback_data)
             nautilus_directory_add_file (directory, file);
             file->details->is_added = TRUE;
             added_files = g_list_prepend (added_files, file);
+            notified = TRUE;
+        }
+
+        if (content_type_info != NULL)
+        {
+            /* Loaded before the file was listed. */
+            if (nautilus_file_update_content_type (file, content_type_info) &&
+                !notified && file->details->is_added)
+            {
+                changed_files = g_list_prepend (changed_files, nautilus_file_ref (file));
+            }
+            g_hash_table_remove (directory->details->pending_content_types, name);
         }
     }
 
@@ -1001,10 +1019,178 @@ directory_load_cancel (NautilusDirectory *directory)
     }
 }
 
+typedef struct ContentTypeLoadState
+{
+    NautilusDirectory *directory; /* NULL when cancelled */
+    GCancellable *cancellable;
+    GFileEnumerator *enumerator;
+} ContentTypeLoadState;
+
+static void
+content_type_load_state_free (ContentTypeLoadState *state)
+{
+    g_clear_object (&state->enumerator);
+    g_object_unref (state->cancellable);
+    g_free (state);
+}
+
+static void
+content_type_load_cancel (NautilusDirectory *directory)
+{
+    ContentTypeLoadState *state = directory->details->content_type_load_in_progress;
+
+    if (state != NULL)
+    {
+        g_cancellable_cancel (state->cancellable);
+        state->directory = NULL;
+        directory->details->content_type_load_in_progress = NULL;
+    }
+}
+
+/* Apply content types to the files they belong to, or keep them until the
+ * files are listed. */
+static void
+apply_content_types (NautilusDirectory *directory,
+                     GList             *infos)
+{
+    GList *changed_files = NULL;
+
+    for (GList *l = infos; l != NULL; l = l->next)
+    {
+        GFileInfo *info = l->data;
+        const char *name = g_file_info_get_name (info);
+        NautilusFile *file = nautilus_directory_find_file_by_name (directory, name);
+
+        if (file != NULL)
+        {
+            if (nautilus_file_update_content_type (file, info) && file->details->is_added)
+            {
+                changed_files = g_list_prepend (changed_files, nautilus_file_ref (file));
+            }
+        }
+        else
+        {
+            if (directory->details->pending_content_types == NULL)
+            {
+                directory->details->pending_content_types =
+                    g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_object_unref);
+            }
+            g_hash_table_insert (directory->details->pending_content_types,
+                                 g_strdup (name), g_object_ref (info));
+        }
+    }
+
+    nautilus_directory_emit_change_signals (directory, changed_files);
+    nautilus_file_list_free (changed_files);
+}
+
+static void
+content_types_more_files_callback (GObject      *source_object,
+                                   GAsyncResult *res,
+                                   gpointer      user_data)
+{
+    ContentTypeLoadState *state = user_data;
+    g_autolist (GFileInfo) infos = NULL;
+    g_autoptr (GError) error = NULL;
+
+    infos = g_file_enumerator_next_files_finish (G_FILE_ENUMERATOR (source_object), res, &error);
+
+    if (state->directory == NULL)
+    {
+        content_type_load_state_free (state);
+        return;
+    }
+
+    g_autoptr (NautilusDirectory) directory = nautilus_directory_ref (state->directory);
+
+    if (infos != NULL)
+    {
+        apply_content_types (directory, infos);
+        g_file_enumerator_next_files_async (state->enumerator,
+                                            DIRECTORY_LOAD_ITEMS_PER_CALLBACK,
+                                            G_PRIORITY_DEFAULT,
+                                            state->cancellable,
+                                            content_types_more_files_callback,
+                                            state);
+    }
+    else
+    {
+        /* On errors, files keep the content types guessed from their names. */
+        directory->details->content_type_load_in_progress = NULL;
+        directory->details->content_types_loaded = TRUE;
+        content_type_load_state_free (state);
+    }
+
+    nautilus_directory_async_state_changed (directory);
+}
+
+static void
+content_types_enumerate_callback (GObject      *source_object,
+                                  GAsyncResult *res,
+                                  gpointer      user_data)
+{
+    ContentTypeLoadState *state = user_data;
+    g_autoptr (GError) error = NULL;
+
+    state->enumerator = g_file_enumerate_children_finish (G_FILE (source_object), res, &error);
+
+    if (state->directory == NULL)
+    {
+        content_type_load_state_free (state);
+        return;
+    }
+
+    if (state->enumerator == NULL)
+    {
+        g_autoptr (NautilusDirectory) directory = nautilus_directory_ref (state->directory);
+
+        directory->details->content_type_load_in_progress = NULL;
+        directory->details->content_types_loaded = TRUE;
+        content_type_load_state_free (state);
+        nautilus_directory_async_state_changed (directory);
+
+        return;
+    }
+
+    g_file_enumerator_next_files_async (state->enumerator,
+                                        DIRECTORY_LOAD_ITEMS_PER_CALLBACK,
+                                        G_PRIORITY_DEFAULT,
+                                        state->cancellable,
+                                        content_types_more_files_callback,
+                                        state);
+}
+
+static void
+content_type_load_start (NautilusDirectory *directory)
+{
+    ContentTypeLoadState *state;
+
+    if (directory->details->content_type_load_in_progress != NULL ||
+        directory->details->content_types_loaded)
+    {
+        return;
+    }
+
+    state = g_new0 (ContentTypeLoadState, 1);
+    state->directory = directory;
+    state->cancellable = g_cancellable_new ();
+    directory->details->content_type_load_in_progress = state;
+
+    g_file_enumerate_children_async (directory->details->location,
+                                     NAUTILUS_FILE_CONTENT_TYPE_ATTRIBUTES,
+                                     0,
+                                     G_PRIORITY_DEFAULT,
+                                     state->cancellable,
+                                     content_types_enumerate_callback,
+                                     state);
+}
+
 static void
 file_list_cancel (NautilusDirectory *directory)
 {
     directory_load_cancel (directory);
+    content_type_load_cancel (directory);
+    g_clear_pointer (&directory->details->pending_content_types, g_hash_table_destroy);
 
     if (directory->details->dequeue_pending_idle_id != 0)
     {
@@ -1606,6 +1792,16 @@ lacks_info (NautilusFile *file)
 }
 
 static gboolean
+lacks_content_type (NautilusFile *file)
+{
+    /* Once loading content types is done, files it missed keep the one
+     * guessed from their name. */
+    return !file->details->content_type_is_up_to_date &&
+           !file->details->is_gone &&
+           !file->details->directory->details->content_types_loaded;
+}
+
+static gboolean
 lacks_filesystem_info (NautilusFile *file)
 {
     return !file->details->filesystem_info_is_up_to_date;
@@ -1734,6 +1930,14 @@ all_attributes_available (NautilusDirectory  *directory,
     if (IS_ATTRIBUTE_SET (attributes, NAUTILUS_ATTRIBUTE_INFO))
     {
         if (has_problem (directory, file, lacks_info))
+        {
+            return FALSE;
+        }
+    }
+
+    if (IS_ATTRIBUTE_SET (attributes, NAUTILUS_ATTRIBUTE_CONTENT_TYPE))
+    {
+        if (has_problem (directory, file, lacks_content_type))
         {
             return FALSE;
         }
@@ -2139,13 +2343,24 @@ start_monitoring_file_list (NautilusDirectory *directory)
 
     directory->details->directory_load_in_progress = state;
 
+    gboolean separate_content_types = g_file_is_native (directory->details->location);
+
     g_file_enumerate_children_async (directory->details->location,
-                                     NAUTILUS_FILE_DEFAULT_ATTRIBUTES,
+                                     separate_content_types ? NAUTILUS_FILE_LISTING_ATTRIBUTES
+                                                            : NAUTILUS_FILE_DEFAULT_ATTRIBUTES,
                                      0,     /* flags */
                                      G_PRIORITY_DEFAULT,     /* prio */
                                      state->cancellable,
                                      enumerate_children_callback,
                                      state);
+
+    if (separate_content_types)
+    {
+        /* Load the content types at the same time. */
+        content_type_load_cancel (directory);
+        directory->details->content_types_loaded = FALSE;
+        content_type_load_start (directory);
+    }
 }
 
 /* Stop monitoring the file list if it is being monitored. */
@@ -3907,6 +4122,17 @@ start_or_stop_io (NautilusDirectory *directory)
 
     /* Start or stop reading files. */
     file_list_start_or_stop (directory);
+
+    /* Load content types if someone wants them and they weren't loaded
+     * along with the file list, e.g. because that was cancelled. */
+    if (!directory->details->content_types_loaded &&
+        directory->details->content_type_load_in_progress == NULL &&
+        g_file_is_native (directory->details->location) &&
+        (request_counter_has (directory->details->call_when_ready_counters, NAUTILUS_ATTRIBUTE_CONTENT_TYPE) ||
+         request_counter_has (directory->details->monitor_counters, NAUTILUS_ATTRIBUTE_CONTENT_TYPE)))
+    {
+        content_type_load_start (directory);
+    }
 
     /* Stop any no longer wanted attribute fetches. */
     file_info_stop (directory);

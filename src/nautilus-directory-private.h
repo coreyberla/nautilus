@@ -73,6 +73,13 @@ struct NautilusDirectoryPrivate
 	gboolean directory_loaded_sent_notification;
 	DirectoryLoadState *directory_load_in_progress;
 
+	/* Content types are loaded separately from listing local directories,
+	 * as sniffing them can take much longer. */
+	struct ContentTypeLoadState *content_type_load_in_progress;
+	gboolean content_types_loaded;
+	/* name -> GFileInfo with content type, for files not listed yet */
+	GHashTable *pending_content_types;
+
 	GList *pending_file_info; /* list of GnomeVFSFileInfo's that are pending */
 	int confirmed_file_count;
         guint dequeue_pending_idle_id;

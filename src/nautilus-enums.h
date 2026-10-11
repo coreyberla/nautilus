@@ -50,7 +50,7 @@ typedef enum
     NAUTILUS_LIST_ZOOM_LEVEL_LARGE,
 } NautilusListZoomLevel;
 
-#define NAUTILUS_ATTRIBUTE_N_TOTAL 9
+#define NAUTILUS_ATTRIBUTE_N_TOTAL 10
 typedef enum
 {
     /* Some attributes require others, which is done by ORing them */
@@ -64,6 +64,9 @@ typedef enum
     NAUTILUS_ATTRIBUTE_MOUNT                = 1 << 6 | NAUTILUS_ATTRIBUTE_INFO,
     NAUTILUS_ATTRIBUTE_FILESYSTEM_INFO      = 1 << 7,
     NAUTILUS_ATTRIBUTE_FILE_LIST            = 1 << 8,
+    /* The content type sniffed from the file contents. Without it, INFO may
+     * only have the content type guessed from the file name. */
+    NAUTILUS_ATTRIBUTE_CONTENT_TYPE         = 1 << 9 | NAUTILUS_ATTRIBUTE_INFO,
     /* Adjust NAUTILUS_ATTRIBUTE_N_TOTAL when expanding */
 } NautilusAttributes;
 
