@@ -2366,6 +2366,10 @@ count_children_done (NautilusDirectory *directory,
 {
     g_assert (NAUTILUS_IS_FILE (count_file));
 
+    gboolean was_known = count_file->details->got_directory_count;
+    gboolean had_failed = count_file->details->directory_count_failed;
+    guint old_count = count_file->details->directory_count;
+
     count_file->details->directory_count_is_up_to_date = TRUE;
 
     /* Record either a failure or success. */
@@ -2384,9 +2388,15 @@ count_children_done (NautilusDirectory *directory,
     directory->details->count_in_progress = NULL;
 
     /* Send file-changed even if count failed, so interested parties can
-     * distinguish between unknowable and not-yet-known cases.
+     * distinguish between unknowable and not-yet-known cases. But don't send
+     * it when recounting yields the same result.
      */
-    nautilus_file_changed (count_file);
+    if (was_known != count_file->details->got_directory_count ||
+        had_failed != count_file->details->directory_count_failed ||
+        old_count != count_file->details->directory_count)
+    {
+        nautilus_file_changed (count_file);
+    }
 
     /* Start up the next one. */
     async_job_end (directory, "directory count");
@@ -3399,10 +3409,15 @@ got_mount (MountState *state,
     file = nautilus_file_ref (state->file);
 
     file->details->mount_is_up_to_date = TRUE;
+    /* Most lookups find that the file is not a mount, as before. */
+    gboolean mount_changed = file->details->mount != mount;
     nautilus_file_set_mount (file, mount);
 
     nautilus_directory_async_state_changed (directory);
-    nautilus_file_changed (file);
+    if (mount_changed)
+    {
+        nautilus_file_changed (file);
+    }
 
     nautilus_file_unref (file);
 
