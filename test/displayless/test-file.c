@@ -283,6 +283,171 @@ test_file_batch_rename_different_folders (void)
     }
 }
 
+typedef struct
+{
+    gboolean done;
+    GError *error;
+} BatchRenameFailureData;
+
+static void
+batch_rename_failure_callback (NautilusFile *file,
+                               GFile        *result_location,
+                               GError       *error,
+                               gpointer      callback_data)
+{
+    BatchRenameFailureData *data = callback_data;
+
+    g_clear_error (&data->error);
+    data->error = error != NULL ? g_error_copy (error) : NULL;
+    data->done = TRUE;
+}
+
+/* Asserts that the test directory contains exactly the given files, with the
+ * content each file was created with. */
+static void
+assert_tmp_dir_contents (const GStrv names,
+                         const GStrv content)
+{
+    g_autoptr (GFile) dir = g_file_new_for_path (test_get_tmp_dir ());
+    g_autoptr (GFileEnumerator) enumerator = g_file_enumerate_children (dir,
+                                                                        G_FILE_ATTRIBUTE_STANDARD_NAME,
+                                                                        G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS,
+                                                                        NULL, NULL);
+    guint n_children = 0;
+
+    g_assert_nonnull (enumerator);
+    while (TRUE)
+    {
+        GFileInfo *info = NULL;
+
+        g_assert_true (g_file_enumerator_iterate (enumerator, &info, NULL, NULL, NULL));
+        if (info == NULL)
+        {
+            break;
+        }
+
+        g_assert_true (g_strv_contains ((const gchar * const *) names, g_file_info_get_name (info)));
+        n_children++;
+    }
+
+    g_assert_cmpuint (n_children, ==, g_strv_length (names));
+
+    for (guint i = 0; names[i] != NULL; i++)
+    {
+        g_autoptr (GFile) location = g_file_get_child (dir, names[i]);
+        g_autofree gchar *file_content = NULL;
+
+        g_assert_true (g_file_load_contents (location, NULL, &file_content, NULL, NULL, NULL));
+        g_assert_cmpstr (file_content, ==, content[i]);
+    }
+}
+
+static void
+batch_rename_cycle_failure_test (const GStrv original_names,
+                                 const GStrv new_names,
+                                 guint       missing_index)
+{
+    g_autolist (NautilusFile) files = NULL;
+    g_autolist (GString) new_name_list = NULL;
+    g_autoptr (GStrvBuilder) names_builder = g_strv_builder_new ();
+    g_autoptr (GStrvBuilder) names_after_undo_builder = g_strv_builder_new ();
+    g_autoptr (GStrvBuilder) content_builder = g_strv_builder_new ();
+    g_auto (GStrv) expected_names = NULL;
+    g_auto (GStrv) expected_names_after_undo = NULL;
+    g_auto (GStrv) expected_content = NULL;
+    BatchRenameFailureData data = { FALSE, NULL };
+    const gsize len = g_strv_length (original_names);
+    char *other_hierarchy[] = { "other", NULL };
+
+    file_hierarchy_create (original_names, "");
+    file_hierarchy_create (other_hierarchy, "");
+
+    for (gint i = len - 1; i >= 0; i--)
+    {
+        g_autoptr (GFile) location = g_file_new_build_filename (test_get_tmp_dir (),
+                                                                original_names[i],
+                                                                NULL);
+
+        files = g_list_prepend (files, nautilus_file_get (location));
+        new_name_list = g_list_prepend (new_name_list, g_string_new (new_names[i]));
+    }
+
+    for (guint i = 0; i < len; i++)
+    {
+        if (i != missing_index)
+        {
+            g_strv_builder_add (names_builder, original_names[i]);
+            g_strv_builder_add (names_after_undo_builder, original_names[i]);
+            g_strv_builder_add (content_builder, original_names[i]);
+        }
+    }
+
+    /* A rename that is not part of the cycle and should not be affected. */
+    g_autoptr (GFile) other_location = g_file_new_build_filename (test_get_tmp_dir (),
+                                                                  "other",
+                                                                  NULL);
+    files = g_list_append (files, nautilus_file_get (other_location));
+    new_name_list = g_list_append (new_name_list, g_string_new ("other_renamed"));
+    g_strv_builder_add (names_builder, "other_renamed");
+    g_strv_builder_add (names_after_undo_builder, "other");
+    g_strv_builder_add (content_builder, "other");
+
+    expected_names = g_strv_builder_end (names_builder);
+    expected_names_after_undo = g_strv_builder_end (names_after_undo_builder);
+    expected_content = g_strv_builder_end (content_builder);
+
+    /* Remove one file of the cycle behind Nautilus' back, so that renaming
+     * it fails while the cycle is being processed. */
+    g_autoptr (GFile) missing_location = g_file_new_build_filename (test_get_tmp_dir (),
+                                                                    original_names[missing_index],
+                                                                    NULL);
+    g_assert_true (g_file_delete (missing_location, NULL, NULL));
+
+    nautilus_file_batch_rename (files, new_name_list, batch_rename_failure_callback, &data);
+
+    g_assert_true (data.done);
+    g_assert_error (data.error, G_IO_ERROR, G_IO_ERROR_FAILED);
+    g_clear_error (&data.error);
+
+    /* The cycle must be left untouched, without any file left behind with a
+     * temporary name, while the unrelated rename went through. */
+    assert_tmp_dir_contents (expected_names, expected_content);
+
+    /* Undo only has to revert the rename that happened. */
+    test_operation_undo ();
+
+    assert_tmp_dir_contents (expected_names_after_undo, expected_content);
+
+    test_clear_tmp_dir ();
+}
+
+static void
+test_file_batch_rename_cycle_failure (void)
+{
+    char *test_cases[][2][4] =
+    {
+        /* Small cycle */
+        {{"file_1", "file_2", NULL},
+         {"file_2", "file_1", NULL}},
+        /* Three file cycle, so that a failure can also happen after a
+         * rename in the cycle already succeeded. */
+        {{"file_1", "file_2", "file_3", NULL},
+         {"file_2", "file_3", "file_1", NULL}},
+    };
+
+    for (guint i = 0; i < G_N_ELEMENTS (test_cases); i++)
+    {
+        /* Which file of the cycle gets the temporary name depends on hash
+         * table ordering, so make each file of the cycle fail in turn. This
+         * covers failing to rename to the temporary name, failing the first
+         * rename and failing after other renames succeeded. */
+        for (guint missing = 0; missing < g_strv_length (test_cases[i][0]); missing++)
+        {
+            batch_rename_cycle_failure_test (test_cases[i][0], test_cases[i][1], missing);
+        }
+    }
+}
+
 static void
 test_file_permissions_can_set (void)
 {
@@ -479,6 +644,8 @@ main (int   argc,
                      test_file_batch_rename_replace);
     g_test_add_func ("/file-batch-rename/different-folders",
                      test_file_batch_rename_different_folders);
+    g_test_add_func ("/file-batch-rename/cycle-failure",
+                     test_file_batch_rename_cycle_failure);
     g_test_add_func ("/file/permissions/can_set",
                      test_file_permissions_can_set);
     g_test_add_func ("/file/permissions/basic",

@@ -378,24 +378,20 @@ file_name_conflicts_with_results (GList   *selection,
 
         if (g_strcmp0 (name1, old_name->str) == 0)
         {
+            g_autofree gchar *selection_parent_uri = nautilus_file_get_parent_uri (selection_file);
+
+            /* a file with the same name in another folder is irrelevant */
+            if (parent_uri != NULL && g_strcmp0 (parent_uri, selection_parent_uri) != 0)
+            {
+                continue;
+            }
+
             new_name = l2->data;
 
             /* if the name didn't change, then there's a conflict */
             if (g_string_equal (old_name, new_name))
             {
-                if (parent_uri == NULL)
-                {
-                    return FALSE;
-                }
-
-                g_autofree gchar *selection_parent_uri = NULL;
-
-                selection_parent_uri = nautilus_file_get_parent_uri (selection_file);
-
-                if (g_strcmp0 (parent_uri, selection_parent_uri) == 0)
-                {
-                    return FALSE;
-                }
+                return FALSE;
             }
 
             /* if this file exists and it changed it's name, then there's no

@@ -25,6 +25,7 @@
 #include "nautilus-file.h"
 #include "nautilus-error-reporting.h"
 #include "nautilus-batch-rename-utilities.h"
+#include "nautilus-ui-utilities.h"
 
 #include <glib/gprintf.h>
 #include <glib.h>
@@ -415,10 +416,28 @@ batch_rename_dialog_get_new_names (NautilusBatchRenameDialog *dialog)
 }
 
 static void
+batch_rename_done (NautilusFile *file,
+                   GFile        *result_location,
+                   GError       *error,
+                   gpointer      callback_data)
+{
+    NautilusBatchRenameDialog *dialog = callback_data;
+
+    if (error == NULL)
+    {
+        return;
+    }
+
+    nautilus_show_ok_dialog (_("Not all items could be renamed."),
+                             _("Some items were skipped because renaming them failed."),
+                             GTK_WIDGET (dialog->window));
+}
+
+static void
 begin_batch_rename (NautilusBatchRenameDialog *dialog,
                     GList                     *new_names)
 {
-    nautilus_file_batch_rename (dialog->selection, new_names, NULL, NULL);
+    nautilus_file_batch_rename (dialog->selection, new_names, batch_rename_done, dialog);
 
     gtk_widget_set_cursor (GTK_WIDGET (dialog->window), NULL);
 }
@@ -1056,6 +1075,11 @@ update_display_text (NautilusBatchRenameDialog *dialog)
 
     if (have_unallowed_character (dialog))
     {
+        /* A conflict check still running for the previous names would
+         * re-enable the rename button when it finishes. */
+        cancel_conflict_check (dialog);
+        dialog->rename_clicked = FALSE;
+
         return;
     }
 
