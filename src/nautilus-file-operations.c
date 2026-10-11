@@ -6580,6 +6580,15 @@ create_task_done (GObject      *source_object,
     CreateJob *job;
 
     job = user_data;
+
+    /* GtkRecentManager may only be used from the main thread. */
+    if (job->created_file != NULL)
+    {
+        g_autofree gchar *uri = g_file_get_uri (job->created_file);
+
+        gtk_recent_manager_add_item (gtk_recent_manager_get_default (), uri);
+    }
+
     if (job->done_callback)
     {
         job->done_callback (job->created_file,
@@ -6614,7 +6623,6 @@ create_task_thread_func (GTask        *task,
     CommonJob *common;
     int count;
     g_autoptr (GFile) dest = NULL;
-    g_autofree gchar *dest_uri = NULL;
     g_autofree char *filename = NULL;
     g_autofree char *dest_fs_type = NULL;
     gboolean res;
@@ -6819,8 +6827,6 @@ create_task_thread_func (GTask        *task,
         {
             job->created_file = g_object_ref (dest);
             nautilus_file_changes_queue_file_added (dest);
-            dest_uri = g_file_get_uri (dest);
-            gtk_recent_manager_add_item (gtk_recent_manager_get_default (), dest_uri);
         }
         else
         {
