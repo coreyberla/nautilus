@@ -74,6 +74,41 @@ static void on_begin_loading (NautilusFilesView *view) { print_event (view, "beg
 static void on_end_loading (NautilusFilesView *view) { print_event (view, "end-loading"); }
 static void on_notify_loading (NautilusFilesView *view) { print_event (view, "notify::loading"); }
 
+static guint finalized_files;
+
+static void
+on_file_finalized (gpointer  data,
+                   GObject  *where_the_object_was)
+{
+    finalized_files++;
+}
+
+/* Count when files currently shown in the view are finalized. */
+static void
+watch_model_files (NautilusViewModel *model)
+{
+    static GHashTable *watched = NULL;
+    guint n_items = g_list_model_get_n_items (G_LIST_MODEL (model));
+
+    if (watched == NULL)
+    {
+        watched = g_hash_table_new (NULL, NULL);
+    }
+
+    for (guint i = 0; i < n_items; i++)
+    {
+        g_autoptr (GtkTreeListRow) row = g_list_model_get_item (G_LIST_MODEL (model), i);
+        g_autoptr (NautilusViewItem) item = gtk_tree_list_row_get_item (row);
+        NautilusFile *file = nautilus_view_item_get_file (item);
+
+        if (g_hash_table_add (watched, file))
+        {
+            g_object_weak_ref (G_OBJECT (file), on_file_finalized, NULL);
+        }
+    }
+    finalized_files = 0;
+}
+
 static guint
 env_uint (const char *name,
           guint       fallback)
@@ -223,18 +258,22 @@ main (int   argc,
     nautilus_files_view_set_selection (view, selection, NAUTILUS_SELECTION_SOURCE_MANUAL);
     g_print ("select %6u:    %8.1f ms\n", g_list_length (selection), ms_since (start));
 
-    /* 5. Revisit while the directory is still cached */
+    /* 5. Revisit. The NautilusDirectory stays alive, but files nothing else
+     * references are released once the view stops monitoring them. */
     g_autoptr (NautilusDirectory) cached = nautilus_directory_get (tmp_location);
+    watch_model_files (model);
     nautilus_files_view_set_location (view, home);
     ITERATE_WHILE (nautilus_files_view_get_loading (view));
     end_changes = (Timer) { 0 };
     start = g_get_monotonic_time ();
     nautilus_files_view_set_location (view, tmp_location);
     ITERATE_WHILE (nautilus_files_view_get_loading (view));
+    g_print ("revisit items:   %u NautilusFile objects finalized\n", finalized_files);
     g_print ("revisit:         %8.1f ms  (end-file-changes %.1f ms in %u calls)\n",
              ms_since (start), end_changes.total / 1000.0, end_changes.count);
 
     /* 6. Refresh (F5): everything gets refetched. */
+    watch_model_files (model);
     g_printerr ("REFRESH-START %d view=%p\n", getpid (), (void *) view);
     refresh_start = g_get_monotonic_time ();
     g_signal_connect (view, "begin-loading", G_CALLBACK (on_begin_loading), NULL);
@@ -266,7 +305,8 @@ main (int   argc,
         }
         g_object_unref (item);
     }
-    g_print ("refresh items:   %u, %u without up-to-date info\n", n_items, stale);
+    g_print ("refresh items:   %u, %u without up-to-date info, %u NautilusFile objects finalized\n",
+             n_items, stale, finalized_files);
     g_print ("refresh:         %8.1f ms  (settled after %.1f ms, main thread CPU %.1f ms, %u file-changed, end-file-changes %.1f ms in %u calls)\n",
              load_ms, ms_since (start) - 3000, cpu_ms () - cpu_start, changed,
              end_changes.total / 1000.0, end_changes.count);
