@@ -58,3 +58,9 @@ foreach test_name, extra_args : tests
     suite: suite,
   )
 endforeach
+
+executable(
+  'bench-files-view',
+  'bench-files-view.c',
+  dependencies: [libnautilus_dep, libtestutils_dep],
+)
