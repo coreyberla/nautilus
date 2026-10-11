@@ -338,22 +338,26 @@ nautilus_date_time_is_between_dates (GDateTime *date,
     return in_between;
 }
 
-static void
-show_ok_dialog_idle (gpointer user_data)
+typedef struct
 {
-    AdwDialog *dialog = user_data;
-    GtkWidget *parent = g_object_get_data (G_OBJECT (dialog), "parent-widget");
+    char *heading;
+    char *body;
+    GtkWidget *parent;
+} OkDialogData;
 
-    if (gtk_widget_get_mapped (parent))
-    {
-        adw_dialog_present (dialog, parent);
-    }
+static void
+ok_dialog_data_free (OkDialogData *data)
+{
+    g_free (data->heading);
+    g_free (data->body);
+    g_clear_object (&data->parent);
+    g_free (data);
 }
 
-void
-nautilus_show_ok_dialog (const char *heading,
-                         const char *body,
-                         GtkWidget  *parent)
+static void
+present_ok_dialog (const char *heading,
+                   const char *body,
+                   GtkWidget  *parent)
 {
     AdwAlertDialog *dialog = ADW_ALERT_DIALOG (adw_alert_dialog_new (heading, body));
 
@@ -367,15 +371,43 @@ nautilus_show_ok_dialog (const char *heading,
         parent = GTK_WIDGET (gtk_application_get_active_window (app));
     }
 
+    adw_dialog_present (ADW_DIALOG (dialog), parent);
+}
+
+static void
+show_ok_dialog_idle (gpointer user_data)
+{
+    OkDialogData *data = user_data;
+
+    /* Skip the dialog if its parent window went away in the meantime. */
+    if (data->parent == NULL || gtk_widget_get_mapped (data->parent))
+    {
+        present_ok_dialog (data->heading, data->body, data->parent);
+    }
+
+    ok_dialog_data_free (data);
+}
+
+void
+nautilus_show_ok_dialog (const char *heading,
+                         const char *body,
+                         GtkWidget  *parent)
+{
     if (g_main_context_is_owner (g_main_context_default ()))
     {
-        adw_dialog_present (ADW_DIALOG (dialog), parent);
+        present_ok_dialog (heading, body, parent);
     }
     else
     {
-        g_object_set_data_full (G_OBJECT (dialog), "parent-widget", parent, g_object_unref);
+        /* Widgets must only be created on the main thread, so defer all of
+         * the dialog work to it. */
+        OkDialogData *data = g_new0 (OkDialogData, 1);
 
-        g_idle_add_once (show_ok_dialog_idle, dialog);
+        data->heading = g_strdup (heading);
+        data->body = g_strdup (body);
+        data->parent = parent != NULL ? g_object_ref (parent) : NULL;
+
+        g_idle_add_once (show_ok_dialog_idle, data);
     }
 }
 
