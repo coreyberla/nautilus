@@ -49,7 +49,23 @@ typedef struct
 {
     NautilusFileCallback callback;
     gpointer callback_data;
+    /* Set once the mount this callback waits for has finished */
+    gboolean ready;
 } InternalPlaceFileCallback;
+
+static GList *
+find_ready_callback (GList *callbacks)
+{
+    for (GList *l = callbacks; l != NULL; l = l->next)
+    {
+        if (((InternalPlaceFileCallback *) l->data)->ready)
+        {
+            return l;
+        }
+    }
+
+    return NULL;
+}
 
 static void
 network_mount_callback (GObject      *source_object,
@@ -58,30 +74,44 @@ network_mount_callback (GObject      *source_object,
 {
     g_autoptr (GError) error = NULL;
 
-    if (!g_file_mount_enclosing_volume_finish (G_FILE (source_object), result, &error) &&
-        !g_error_matches (error, G_IO_ERROR, G_IO_ERROR_ALREADY_MOUNTED))
+    if (!g_file_mount_enclosing_volume_finish (G_FILE (source_object), result, &error))
     {
-        if (!g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+        if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
         {
+            /* The file may be gone already, so don't touch it. */
+            return;
+        }
+
+        if (!g_error_matches (error, G_IO_ERROR, G_IO_ERROR_ALREADY_MOUNTED))
+        {
+            /* Still report ready, the mount is only a workaround and waiting
+             * would leave the callers hanging. */
             g_warning ("Could not mount '%s': %s", SCHEME_NETWORK ":///", error->message);
         }
-        return;
     }
 
-    NautilusInternalPlaceFile *self = NAUTILUS_INTERNAL_PLACE_FILE (data);
+    g_autoptr (NautilusInternalPlaceFile) self = g_object_ref (NAUTILUS_INTERNAL_PLACE_FILE (data));
 
-    /* Clear cancellable and steal callbacks list because call_when_ready() may
-     * be called again inside the `for` loop. */
+    /* Clear the cancellable so call_when_ready() starts a new mount if it is
+     * called from one of the callbacks below. */
     g_clear_object (&self->network_mount_cancellable);
 
-    GList *callbacks = g_steal_pointer (&self->callbacks);
-    for (GList *l = callbacks; l != NULL; l = l->next)
+    for (GList *l = self->callbacks; l != NULL; l = l->next)
     {
-        InternalPlaceFileCallback *callback = l->data;
+        ((InternalPlaceFileCallback *) l->data)->ready = TRUE;
+    }
 
+    /* Callbacks may add or cancel callbacks, so remove each one from the list
+     * before invoking it, and only invoke the ones that were waiting for this
+     * mount. */
+    GList *link;
+    while ((link = find_ready_callback (self->callbacks)) != NULL)
+    {
+        g_autofree InternalPlaceFileCallback *callback = link->data;
+
+        self->callbacks = g_list_delete_link (self->callbacks, link);
         (*callback->callback)(NAUTILUS_FILE (self), callback->callback_data);
     }
-    g_list_free_full (callbacks, g_free);
 }
 
 static void
@@ -105,9 +135,9 @@ real_call_when_ready (NautilusFile         *file,
 
         if (callback != NULL)
         {
-            InternalPlaceFileCallback data = {callback, callback_data};
-            self->callbacks = g_list_prepend (self->callbacks,
-                                              g_memdup2 (&data, sizeof (data)));
+            InternalPlaceFileCallback data = {callback, callback_data, FALSE};
+            self->callbacks = g_list_append (self->callbacks,
+                                             g_memdup2 (&data, sizeof (data)));
         }
 
         /* If there is a cancellable, we are already mounting */
@@ -137,9 +167,24 @@ real_cancel_call_when_ready (NautilusFile         *file,
 {
     NautilusInternalPlaceFile *self = NAUTILUS_INTERNAL_PLACE_FILE (file);
 
-    g_clear_list (&self->callbacks, g_free);
-    g_cancellable_cancel (self->network_mount_cancellable);
-    g_clear_object (&self->network_mount_cancellable);
+    for (GList *l = self->callbacks; l != NULL; l = l->next)
+    {
+        InternalPlaceFileCallback *data = l->data;
+
+        if (data->callback == callback && data->callback_data == callback_data)
+        {
+            self->callbacks = g_list_delete_link (self->callbacks, l);
+            g_free (data);
+            break;
+        }
+    }
+
+    /* Only stop mounting once nobody is waiting for it anymore */
+    if (self->callbacks == NULL)
+    {
+        g_cancellable_cancel (self->network_mount_cancellable);
+        g_clear_object (&self->network_mount_cancellable);
+    }
 }
 
 static gboolean
