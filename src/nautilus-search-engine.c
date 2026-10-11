@@ -253,8 +253,12 @@ setup_provider (NautilusSearchEngine    *self,
                                       self);
         }
     }
-    else
+    else if (*provider_pointer != NULL)
     {
+        /* Stop it first, so it reports finishing to the engine if it was
+         * part of the current search. A delayed provider does so right away,
+         * a running one keeps itself alive until it does. */
+        nautilus_search_provider_stop (*provider_pointer);
         g_clear_object (provider_pointer);
     }
 }
@@ -270,6 +274,11 @@ nautilus_search_engine_set_search_type (NautilusSearchEngine *self,
 
     self->search_type = search_type;
 
+    /* Dropped providers may finish while being set up. Defer checking whether
+     * the search is done until all providers are set up. */
+    gboolean was_starting = self->starting;
+    self->starting = TRUE;
+
     setup_provider (self, &self->localsearch, NAUTILUS_SEARCH_TYPE_LOCALSEARCH,
                     (CreateFunc) nautilus_search_engine_localsearch_new);
     setup_provider (self, &self->model, NAUTILUS_SEARCH_TYPE_MODEL,
@@ -278,6 +287,13 @@ nautilus_search_engine_set_search_type (NautilusSearchEngine *self,
                     (CreateFunc) nautilus_search_engine_recent_new);
     setup_provider (self, &self->simple, NAUTILUS_SEARCH_TYPE_SIMPLE,
                     (CreateFunc) nautilus_search_engine_simple_new);
+
+    self->starting = was_starting;
+
+    if (self->running && !self->starting)
+    {
+        check_providers_status (self);
+    }
 }
 
 static void

@@ -221,10 +221,11 @@ nautilus_search_provider_finished (NautilusSearchProvider *self)
 
     g_debug ("Search provider '%s' finished", search_provider_name (self));
 
-    /* Drop self-reference, counterpart to start() */
-    g_object_unref (self);
-
     g_signal_emit (self, signals[FINISHED], 0);
+
+    /* Drop self-reference, counterpart to start(). Only after emitting, since
+     * it may be the last reference if the engine dropped this provider. */
+    g_object_unref (self);
 }
 
 /**
