@@ -1661,20 +1661,51 @@ has_problem (NautilusDirectory *directory,
              NautilusFile      *file,
              FileCheck          problem)
 {
-    GList *node;
+    GHashTable *hints;
+    GList *hint, *forward, *backward;
 
     if (file != NULL)
     {
         return (*problem)(file);
     }
 
-    for (node = directory->details->file_list; node != NULL; node = node->next)
+    /* This is checked after every bit of I/O completes, so scanning the whole
+     * list each time would be quadratic. Files tend to be handled in list
+     * order, so start where the problem was last found and search outwards,
+     * which still visits every file when needed. */
+    if (directory->details->problem_hints == NULL)
     {
-        if ((*problem)(node->data))
+        directory->details->problem_hints = g_hash_table_new (NULL, NULL);
+    }
+    hints = directory->details->problem_hints;
+    hint = g_hash_table_lookup (hints, problem);
+
+    forward = hint != NULL ? hint : directory->details->file_list;
+    backward = hint != NULL ? hint->prev : NULL;
+    while (forward != NULL || backward != NULL)
+    {
+        if (forward != NULL)
         {
-            return TRUE;
+            if ((*problem)(forward->data))
+            {
+                g_hash_table_insert (hints, problem, forward);
+                return TRUE;
+            }
+            forward = forward->next;
+        }
+
+        if (backward != NULL)
+        {
+            if ((*problem)(backward->data))
+            {
+                g_hash_table_insert (hints, problem, backward);
+                return TRUE;
+            }
+            backward = backward->prev;
         }
     }
+
+    g_hash_table_remove (hints, problem);
 
     return FALSE;
 }

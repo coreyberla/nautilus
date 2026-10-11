@@ -39,6 +39,8 @@ struct NautilusDirectoryPrivate
 	NautilusFile *as_file;
 	GList *file_list;
 	GHashTable *file_hash;
+	/* FileCheck -> file_list node last found to have that problem. */
+	GHashTable *problem_hints;
 
 	/* Queues of files needing some I/O done. */
 	NautilusHashQueue *high_priority_queue;

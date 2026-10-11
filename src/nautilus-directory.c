@@ -160,6 +160,7 @@ nautilus_directory_finalize (GObject *object)
 
     g_warn_if_fail (directory->details->file_list == NULL);
     g_hash_table_destroy (directory->details->file_hash);
+    g_clear_pointer (&directory->details->problem_hints, g_hash_table_destroy);
 
     nautilus_hash_queue_destroy (directory->details->high_priority_queue);
     nautilus_hash_queue_destroy (directory->details->low_priority_queue);
@@ -731,6 +732,14 @@ nautilus_directory_are_all_files_seen (NautilusDirectory *directory)
     return NAUTILUS_DIRECTORY_CLASS (G_OBJECT_GET_CLASS (directory))->are_all_files_seen (directory);
 }
 
+static gboolean
+is_hint_for_node (gpointer key,
+                  gpointer value,
+                  gpointer node)
+{
+    return value == node;
+}
+
 static void
 add_to_hash_table (NautilusDirectory *directory,
                    NautilusFile      *file,
@@ -813,6 +822,13 @@ nautilus_directory_remove_file (NautilusDirectory *directory,
     GList *node = extract_from_hash_table (directory, file);
     g_return_if_fail (node != NULL);
     g_return_if_fail (node->data == file);
+
+    /* Don't leave dangling hints to the node. */
+    if (directory->details->problem_hints != NULL)
+    {
+        g_hash_table_foreach_remove (directory->details->problem_hints,
+                                     (GHRFunc) is_hint_for_node, node);
+    }
 
     /* Remove the item from the list. */
     directory->details->file_list = g_list_remove_link
