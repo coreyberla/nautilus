@@ -8533,9 +8533,12 @@ load_directory (NautilusFilesView *self,
         (self->directory_as_file,
         attributes,
         metadata_for_directory_as_file_ready_callback, self);
+    /* Files in the directory don't need filesystem info (the monitor added
+     * when loading finishes doesn't request it either). Requesting it here
+     * would query it for every cached file before loading can finish. */
     nautilus_directory_call_when_ready
         (self->directory,
-        attributes,
+        attributes & ~NAUTILUS_ATTRIBUTE_FILESYSTEM_INFO,
         metadata_for_files_in_directory_ready_callback, self);
 
     /* If capabilities change, then we need to update the menus
