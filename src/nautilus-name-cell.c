@@ -7,6 +7,7 @@
 #include "nautilus-name-cell.h"
 
 #include <adwaita.h>
+#include <glib/gi18n.h>
 
 #include "nautilus-directory.h"
 #include "nautilus-file.h"
@@ -29,6 +30,7 @@ struct _NautilusNameCell
     GtkWidget *top_child;
     GtkWidget *expander;
     GtkWidget *content;
+    GtkWidget *labels_box;
     GtkWidget *fixed_height_box;
     GtkWidget *spinner;
     GtkWidget *icon;
@@ -102,6 +104,90 @@ get_path_text (NautilusFile *file,
     return g_steal_pointer (&path);
 }
 
+static void popover_show_cb (NautilusNameCell *self);
+
+static PangoAttrList *
+new_no_hyphens_attributes (void)
+{
+    PangoAttrList *attributes = pango_attr_list_new ();
+
+    pango_attr_list_insert (attributes, pango_attr_insert_hyphens_new (FALSE));
+
+    return attributes;
+}
+
+/* The path, snippet and spinner are only needed in some cases, e.g. search,
+ * so only create them when needed. Every row of the list view creates a cell,
+ * and they are recreated whenever another folder is loaded. */
+static void
+ensure_path (NautilusNameCell *self)
+{
+    g_autoptr (PangoAttrList) attributes = NULL;
+
+    if (self->path != NULL)
+    {
+        return;
+    }
+
+    attributes = new_no_hyphens_attributes ();
+    self->path = gtk_label_new (NULL);
+    gtk_label_set_ellipsize (GTK_LABEL (self->path), PANGO_ELLIPSIZE_START);
+    gtk_label_set_justify (GTK_LABEL (self->path), GTK_JUSTIFY_LEFT);
+    gtk_label_set_xalign (GTK_LABEL (self->path), 0.0);
+    gtk_label_set_attributes (GTK_LABEL (self->path), attributes);
+    gtk_widget_set_halign (self->path, GTK_ALIGN_FILL);
+    gtk_widget_add_css_class (self->path, "caption");
+    gtk_widget_add_css_class (self->path, "dim-label");
+    gtk_box_append (GTK_BOX (self->labels_box), self->path);
+}
+
+static void
+ensure_snippet (NautilusNameCell *self)
+{
+    GtkWidget *popover;
+
+    if (self->snippet_button != NULL)
+    {
+        return;
+    }
+
+    self->snippet = GTK_LABEL (gtk_label_new (NULL));
+    gtk_label_set_ellipsize (self->snippet, PANGO_ELLIPSIZE_NONE);
+    gtk_label_set_justify (self->snippet, GTK_JUSTIFY_LEFT);
+    gtk_label_set_max_width_chars (self->snippet, 65);
+    gtk_label_set_lines (self->snippet, 10);
+    gtk_label_set_wrap (self->snippet, TRUE);
+    gtk_label_set_wrap_mode (self->snippet, PANGO_WRAP_WORD);
+
+    popover = gtk_popover_new ();
+    gtk_popover_set_child (GTK_POPOVER (popover), GTK_WIDGET (self->snippet));
+    g_signal_connect_swapped (popover, "show", G_CALLBACK (popover_show_cb), self);
+
+    self->snippet_button = gtk_menu_button_new ();
+    gtk_widget_set_tooltip_text (self->snippet_button, _("Full Text Match"));
+    gtk_menu_button_set_icon_name (GTK_MENU_BUTTON (self->snippet_button), "quotation-symbolic");
+    gtk_menu_button_set_popover (GTK_MENU_BUTTON (self->snippet_button), popover);
+    gtk_widget_set_valign (self->snippet_button, GTK_ALIGN_CENTER);
+    gtk_widget_add_css_class (self->snippet_button, "fts-snippet");
+    gtk_box_append (GTK_BOX (self->content), self->snippet_button);
+}
+
+static void
+ensure_spinner (NautilusNameCell *self)
+{
+    if (self->spinner != NULL)
+    {
+        return;
+    }
+
+    self->spinner = adw_spinner_new ();
+    gtk_widget_set_halign (self->spinner, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign (self->spinner, GTK_ALIGN_CENTER);
+    gtk_widget_set_visible (self->spinner, FALSE);
+    gtk_widget_insert_after (self->spinner, gtk_widget_get_parent (self->emblems_box),
+                             self->emblems_box);
+}
+
 static void
 update_labels (NautilusNameCell *self)
 {
@@ -122,15 +208,29 @@ update_labels (NautilusNameCell *self)
         fts_snippet = nautilus_file_get_search_fts_snippet (file);
     }
 
-    gtk_label_set_text (GTK_LABEL (self->path), path_text);
-    if (fts_snippet != NULL &&
-        !g_str_equal (gtk_label_get_text (self->snippet), fts_snippet))
+    if (path_text != NULL)
     {
-        gtk_label_set_markup (self->snippet, fts_snippet);
+        ensure_path (self);
+    }
+    if (self->path != NULL)
+    {
+        gtk_label_set_text (GTK_LABEL (self->path), path_text);
+        gtk_widget_set_visible (self->path, (path_text != NULL));
     }
 
-    gtk_widget_set_visible (self->path, (path_text != NULL));
-    gtk_widget_set_visible (self->snippet_button, (fts_snippet != NULL));
+    if (fts_snippet != NULL)
+    {
+        ensure_snippet (self);
+    }
+    if (self->snippet_button != NULL)
+    {
+        if (fts_snippet != NULL &&
+            !g_str_equal (gtk_label_get_text (self->snippet), fts_snippet))
+        {
+            gtk_label_set_markup (self->snippet, fts_snippet);
+        }
+        gtk_widget_set_visible (self->snippet_button, (fts_snippet != NULL));
+    }
 }
 
 static void
@@ -283,6 +383,7 @@ on_loading_timeout (gpointer user_data)
 
     if (is_loading)
     {
+        ensure_spinner (self);
         gtk_widget_set_visible (self->spinner, TRUE);
     }
 }
@@ -308,7 +409,10 @@ on_item_is_loading_changed (NautilusNameCell *self)
         gtk_tree_expander_set_hide_expander (GTK_TREE_EXPANDER (self->expander),
                                              !nautilus_directory_is_not_empty (directory));
 
-        gtk_widget_set_visible (self->spinner, FALSE);
+        if (self->spinner != NULL)
+        {
+            gtk_widget_set_visible (self->spinner, FALSE);
+        }
     }
 }
 
@@ -474,15 +578,11 @@ nautilus_name_cell_class_init (NautilusNameCellClass *klass)
     gtk_widget_class_bind_template_child (widget_class, NautilusNameCell, expander);
     gtk_widget_class_bind_template_child (widget_class, NautilusNameCell, content);
     gtk_widget_class_bind_template_child (widget_class, NautilusNameCell, fixed_height_box);
-    gtk_widget_class_bind_template_child (widget_class, NautilusNameCell, spinner);
     gtk_widget_class_bind_template_child (widget_class, NautilusNameCell, icon);
     gtk_widget_class_bind_template_child (widget_class, NautilusNameCell, emblems_box);
-    gtk_widget_class_bind_template_child (widget_class, NautilusNameCell, snippet_button);
-    gtk_widget_class_bind_template_child (widget_class, NautilusNameCell, snippet);
-    gtk_widget_class_bind_template_child (widget_class, NautilusNameCell, path);
+    gtk_widget_class_bind_template_child (widget_class, NautilusNameCell, labels_box);
 
     gtk_widget_class_bind_template_callback (widget_class, on_label_query_tooltip);
-    gtk_widget_class_bind_template_callback (widget_class, popover_show_cb);
 }
 
 NautilusViewCell *

@@ -1,5 +1,4 @@
 using Gtk 4.0;
-using Adw 1;
 
 template $NautilusNameCell: $NautilusViewCell {
   Box top_child {
@@ -30,7 +29,7 @@ template $NautilusNameCell: $NautilusViewCell {
         };
       }
 
-      Box {
+      Box labels_box {
         orientation: vertical;
         halign: fill;
         hexpand: true;
@@ -68,51 +67,7 @@ template $NautilusNameCell: $NautilusViewCell {
               "dim-label",
             ]
           }
-
-          Adw.Spinner spinner {
-            visible: false;
-            halign: center;
-            valign: center;
-          }
         }
-
-        Label path {
-          visible: false;
-          ellipsize: start;
-          justify: left;
-          halign: fill;
-          xalign: 0.0;
-          attributes: "0 -1 insert-hyphens false";
-
-          styles [
-            "caption",
-            "dim-label",
-          ]
-        }
-      }
-
-      MenuButton snippet_button {
-        tooltip-text: _("Full Text Match");
-        visible: false;
-        icon-name: "quotation-symbolic";
-        valign: center;
-
-        styles [
-          "fts-snippet",
-        ]
-
-        popover: Popover {
-          Label snippet {
-            ellipsize: none;
-            justify: left;
-            max-width-chars: 65;
-            lines: 10;
-            wrap: true;
-            wrap-mode: word;
-          }
-
-          show => $popover_show_cb(template);
-        };
       }
     }
   }
