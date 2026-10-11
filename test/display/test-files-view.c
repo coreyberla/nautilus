@@ -1350,6 +1350,56 @@ test_search_list_view_shows_path (void)
 }
 
 static void
+rename_done_cb (NautilusFile *file,
+                GFile        *result_location,
+                GError       *error,
+                gpointer      callback_data)
+{
+    g_assert_no_error (error);
+    *(gboolean *) callback_data = TRUE;
+}
+
+static void
+test_list_view_rename_updates_name (void)
+{
+    const GStrv test_hierarchy = (char *[]) {
+        "old_name",
+        NULL
+    };
+    g_autoptr (NautilusWindowSlot) slot = NULL;
+    g_autoptr (NautilusFilesView) files_view = create_view_with_slot (NAUTILUS_MODE_BROWSE,
+                                                                      NAUTILUS_VIEW_LIST_ID,
+                                                                      &slot);
+    g_autoptr (GFile) tmp_location = g_file_new_for_path (test_get_tmp_dir ());
+    g_autoptr (GFile) old_location = g_file_get_child (tmp_location, "old_name");
+    g_autoptr (NautilusFile) file = NULL;
+    GtkWidget *window = gtk_window_new ();
+    gboolean renamed = FALSE;
+
+    file_hierarchy_create (test_hierarchy, "");
+
+    /* Rows are only created for a view that is shown. */
+    g_object_ref_sink (slot);
+    gtk_window_set_child (GTK_WINDOW (window), GTK_WIDGET (slot));
+    gtk_window_present (GTK_WINDOW (window));
+
+    nautilus_files_view_set_location (files_view, tmp_location);
+    ITER_CONTEXT_WHILE (nautilus_files_view_get_loading (files_view));
+    ITER_CONTEXT_WHILE (!has_visible_label_with_text (window, "old_name"));
+
+    file = nautilus_file_get (old_location);
+    nautilus_file_rename (file, "new_name", rename_done_cb, &renamed);
+    ITER_CONTEXT_WHILE (!renamed);
+
+    ITER_CONTEXT_WHILE (!has_visible_label_with_text (window, "new_name") ||
+                        has_visible_label_with_text (window, "old_name"));
+
+    gtk_window_set_child (GTK_WINDOW (window), NULL);
+    gtk_window_destroy (GTK_WINDOW (window));
+    test_clear_tmp_dir ();
+}
+
+static void
 test_load_dir_images (void)
 {
     g_autoptr (NautilusWindowSlot) slot = NULL;
@@ -1437,6 +1487,8 @@ main (int   argc,
                      test_hidden_files_renamed);
     g_test_add_func ("/view/search/list_view_path",
                      test_search_list_view_shows_path);
+    g_test_add_func ("/view/list_view/rename_updates_name",
+                     test_list_view_rename_updates_name);
     g_test_add_func ("/view/selection/actions",
                      test_selection_actions);
     g_test_add_func ("/view/selection/in_search",
