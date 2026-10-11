@@ -11,6 +11,7 @@
  *               setting (default "mtime")
  * BENCH_ZOOM    grid zoom level for BENCH_IMAGES, e.g. "small"
  * BENCH_WIDTH   window width for BENCH_IMAGES (default 1280)
+ * BENCH_VIEW    "list" to use the list view for BENCH_IMAGES instead of the grid
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -357,9 +358,11 @@ run_image_benchmark (guint n_images)
     nautilus_window_slot_open_location_full (slot, home, NULL);
     ITERATE_WHILE (nautilus_window_slot_get_current_view (slot) == NULL);
     NautilusFilesView *view = nautilus_window_slot_get_current_view (slot);
-    if (nautilus_files_view_get_view_id (view) != NAUTILUS_VIEW_GRID_ID)
+    guint view_id = g_strcmp0 (g_getenv ("BENCH_VIEW"), "list") == 0
+                    ? NAUTILUS_VIEW_LIST_ID : NAUTILUS_VIEW_GRID_ID;
+    if (nautilus_files_view_get_view_id (view) != view_id)
     {
-        nautilus_files_view_change (view, NAUTILUS_VIEW_GRID_ID);
+        nautilus_files_view_change (view, view_id);
         view = nautilus_window_slot_get_current_view (slot);
     }
     ITERATE_WHILE (nautilus_files_view_get_loading (view));
