@@ -159,6 +159,19 @@ build_uris_variant (GVariantBuilder *uris,
     }
 }
 
+static void
+add_to_recents (GList *locations)
+{
+    GtkRecentManager *recent_manager = gtk_recent_manager_get_default ();
+
+    for (GList *l = locations; l != NULL; l = l->next)
+    {
+        g_autofree char *uri = g_file_get_uri (G_FILE (l->data));
+
+        gtk_recent_manager_add_item (recent_manager, uri);
+    }
+}
+
 typedef struct
 {
     char *choice_id;
@@ -242,11 +255,12 @@ on_file_chooser_accepted (gpointer       user_data,
     const char *method_name = g_dbus_method_invocation_get_method_name (data->invocation);
     gboolean writable = FALSE;
     GVariant *choices = get_choices (data, &writable);
+    g_autolist (GFile) unique_locations = NULL;
+    GList *chosen_locations = locations;
 
     if (strcmp (method_name, "SaveFiles") == 0 && data->filenames_to_save != NULL)
     {
         GFile *directory = G_FILE (locations->data);
-        g_autolist (GFile) unique_locations = NULL;
 
         for (gsize i = 0; data->filenames_to_save[i] != NULL; i++)
         {
@@ -258,14 +272,11 @@ on_file_chooser_accepted (gpointer       user_data,
             unique_locations = g_list_prepend (unique_locations, g_steal_pointer (&location));
         }
 
-        build_uris_variant (&uris, unique_locations);
-    }
-    else
-    {
-        build_uris_variant (&uris, locations);
+        chosen_locations = unique_locations;
     }
 
-    /* TODO: add to recents */
+    build_uris_variant (&uris, chosen_locations);
+    add_to_recents (chosen_locations);
 
     if (current_filter != NULL)
     {
