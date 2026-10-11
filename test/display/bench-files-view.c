@@ -23,6 +23,7 @@
 #include <nautilus-resources.h>
 #include <nautilus-tag-manager.h>
 #include <nautilus-view-info.h>
+#include <nautilus-view-item.h>
 #include <nautilus-view-model.h>
 #include <nautilus-window-slot.h>
 
@@ -54,6 +55,24 @@ count_changed (NautilusFilesView *view,
 {
     (*count)++;
 }
+
+static gint64 refresh_start;
+
+static void
+print_event (NautilusFilesView *view,
+             const char        *event)
+{
+    if (refresh_start != 0 && g_getenv ("BENCH_DEBUG") != NULL)
+    {
+        g_printerr ("EVENT %-14s loading=%d after %.1f ms\n", event,
+                    nautilus_files_view_get_loading (view),
+                    (g_get_monotonic_time () - refresh_start) / 1000.0);
+    }
+}
+
+static void on_begin_loading (NautilusFilesView *view) { print_event (view, "begin-loading"); }
+static void on_end_loading (NautilusFilesView *view) { print_event (view, "end-loading"); }
+static void on_notify_loading (NautilusFilesView *view) { print_event (view, "notify::loading"); }
 
 static guint
 env_uint (const char *name,
@@ -216,7 +235,11 @@ main (int   argc,
              ms_since (start), end_changes.total / 1000.0, end_changes.count);
 
     /* 6. Refresh (F5): everything gets refetched. */
-    g_printerr ("REFRESH-START %d\n", getpid ());
+    g_printerr ("REFRESH-START %d view=%p\n", getpid (), (void *) view);
+    refresh_start = g_get_monotonic_time ();
+    g_signal_connect (view, "begin-loading", G_CALLBACK (on_begin_loading), NULL);
+    g_signal_connect (view, "end-loading", G_CALLBACK (on_end_loading), NULL);
+    g_signal_connect (view, "notify::loading", G_CALLBACK (on_notify_loading), NULL);
     iterate_until_quiet (1000, 120000);
     end_changes = (Timer) { 0 };
     changed = 0;
@@ -230,6 +253,20 @@ main (int   argc,
     ITERATE_WHILE (nautilus_files_view_get_loading (view));
     double load_ms = ms_since (start);
     iterate_until_quiet (3000, 120000);
+    guint n_items = g_list_model_get_n_items (G_LIST_MODEL (model));
+    guint stale = 0;
+    for (guint i = 0; i < n_items; i++)
+    {
+        g_autoptr (GtkTreeListRow) row = g_list_model_get_item (G_LIST_MODEL (model), i);
+        NautilusViewItem *item = gtk_tree_list_row_get_item (row);
+
+        if (!nautilus_file_check_if_ready (nautilus_view_item_get_file (item), NAUTILUS_ATTRIBUTE_INFO))
+        {
+            stale++;
+        }
+        g_object_unref (item);
+    }
+    g_print ("refresh items:   %u, %u without up-to-date info\n", n_items, stale);
     g_print ("refresh:         %8.1f ms  (settled after %.1f ms, main thread CPU %.1f ms, %u file-changed, end-file-changes %.1f ms in %u calls)\n",
              load_ms, ms_since (start) - 3000, cpu_ms () - cpu_start, changed,
              end_changes.total / 1000.0, end_changes.count);
