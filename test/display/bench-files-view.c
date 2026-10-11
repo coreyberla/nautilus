@@ -10,6 +10,7 @@
 #define G_LOG_DOMAIN "bench-files-view"
 
 #include <glib/gstdio.h>
+#include <sys/resource.h>
 #include <test-utilities.h>
 
 #include <nautilus-application.h>
@@ -60,6 +61,16 @@ env_uint (const char *name,
     const char *value = g_getenv (name);
 
     return value != NULL ? (guint) g_ascii_strtoull (value, NULL, 10) : fallback;
+}
+
+static double
+cpu_ms (void)
+{
+    struct rusage usage;
+
+    getrusage (RUSAGE_THREAD, &usage);
+    return usage.ru_utime.tv_sec * 1000.0 + usage.ru_utime.tv_usec / 1000.0 +
+           usage.ru_stime.tv_sec * 1000.0 + usage.ru_stime.tv_usec / 1000.0;
 }
 
 static double
@@ -160,9 +171,10 @@ main (int   argc,
     end_changes = (Timer) { 0 };
     changed = 0;
     start = g_get_monotonic_time ();
+    double cpu_start = cpu_ms ();
     iterate_until_quiet (3000, 120000);
-    g_print ("settle:          %8.1f ms  (%u file-changed, end-file-changes %.1f ms in %u calls)\n",
-             ms_since (start) - 3000, changed, end_changes.total / 1000.0, end_changes.count);
+    g_print ("settle:          %8.1f ms  (main thread CPU %.1f ms, %u file-changed, end-file-changes %.1f ms in %u calls)\n",
+             ms_since (start) - 3000, cpu_ms () - cpu_start, changed, end_changes.total / 1000.0, end_changes.count);
 
     /* 3. Touch files after load. */
     end_changes = (Timer) { 0 };
