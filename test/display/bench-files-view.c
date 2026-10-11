@@ -108,7 +108,8 @@ main (int   argc,
     guint changed = 0;
     gint64 start;
 
-    gtk_test_init (&argc, &argv, NULL);
+    gtk_init ();
+    g_log_set_debug_enabled (FALSE);
     nautilus_register_resource ();
     nautilus_ensure_extension_points ();
     nautilus_global_preferences_init ();
