@@ -27,10 +27,9 @@ struct _NautilusNameCell
     GQuark path_attribute_q;
     GFile *file_path_base_location;
 
-    GtkWidget *top_child;
     GtkWidget *expander;
     GtkWidget *content;
-    GtkWidget *labels_box;
+    GtkWidget *labels_grid;
     GtkWidget *fixed_height_box;
     GtkWidget *spinner;
     GtkWidget *icon;
@@ -106,6 +105,20 @@ get_path_text (NautilusFile *file,
 
 static void popover_show_cb (NautilusNameCell *self);
 
+/* Layout of labels_grid */
+enum
+{
+    NAME_COLUMN,
+    EMBLEMS_COLUMN,
+    SPINNER_COLUMN,
+    N_COLUMNS,
+};
+enum
+{
+    NAME_ROW,
+    PATH_ROW,
+};
+
 static PangoAttrList *
 new_no_hyphens_attributes (void)
 {
@@ -138,7 +151,8 @@ ensure_path (NautilusNameCell *self)
     gtk_widget_set_halign (self->path, GTK_ALIGN_FILL);
     gtk_widget_add_css_class (self->path, "caption");
     gtk_widget_add_css_class (self->path, "dim-label");
-    gtk_box_append (GTK_BOX (self->labels_box), self->path);
+    gtk_grid_attach (GTK_GRID (self->labels_grid), self->path,
+                     NAME_COLUMN, PATH_ROW, N_COLUMNS, 1);
 }
 
 static void
@@ -184,8 +198,21 @@ ensure_spinner (NautilusNameCell *self)
     gtk_widget_set_halign (self->spinner, GTK_ALIGN_CENTER);
     gtk_widget_set_valign (self->spinner, GTK_ALIGN_CENTER);
     gtk_widget_set_visible (self->spinner, FALSE);
-    gtk_widget_insert_after (self->spinner, gtk_widget_get_parent (self->emblems_box),
-                             self->emblems_box);
+    gtk_grid_attach (GTK_GRID (self->labels_grid), self->spinner, SPINNER_COLUMN, NAME_ROW, 1, 1);
+}
+
+static void
+ensure_emblems_box (NautilusNameCell *self)
+{
+    if (self->emblems_box != NULL)
+    {
+        return;
+    }
+
+    self->emblems_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_widget_set_halign (self->emblems_box, GTK_ALIGN_START);
+    gtk_widget_add_css_class (self->emblems_box, "dim-label");
+    gtk_grid_attach (GTK_GRID (self->labels_grid), self->emblems_box, EMBLEMS_COLUMN, NAME_ROW, 1, 1);
 }
 
 static void
@@ -304,13 +331,18 @@ update_emblems (NautilusNameCell *self)
     file = nautilus_view_item_get_file (item);
 
     /* Remove old emblems. */
-    while ((child = gtk_widget_get_first_child (self->emblems_box)) != NULL)
+    while (self->emblems_box != NULL &&
+           (child = gtk_widget_get_first_child (self->emblems_box)) != NULL)
     {
         gtk_box_remove (GTK_BOX (self->emblems_box), child);
     }
 
     theme = gtk_icon_theme_get_for_display (gdk_display_get_default ());
     emblems = nautilus_file_get_emblem_icons (file);
+    if (emblems != NULL)
+    {
+        ensure_emblems_box (self);
+    }
     for (GList *l = emblems; l != NULL; l = l->next)
     {
         if (!gtk_icon_theme_has_gicon (theme, l->data))
@@ -569,18 +601,16 @@ nautilus_name_cell_class_init (NautilusNameCellClass *klass)
 
     g_type_ensure (NAUTILUS_TYPE_IMAGE);
 
-    gtk_widget_class_set_layout_manager_type (widget_class, GTK_TYPE_BIN_LAYOUT);
+    gtk_widget_class_set_layout_manager_type (widget_class, GTK_TYPE_BOX_LAYOUT);
     gtk_widget_class_set_template_from_resource (widget_class, "/org/gnome/nautilus/ui/nautilus-name-cell.ui");
 
-    /* Needs to add the direct child of the template widget to dispose it since
-     * a plain GtkWidget doesn't dispose it's child automatically. */
-    gtk_widget_class_bind_template_child (widget_class, NautilusNameCell, top_child);
+    /* Needs to add the direct children of the template widget to dispose them
+     * since a plain GtkWidget doesn't dispose its children automatically. */
     gtk_widget_class_bind_template_child (widget_class, NautilusNameCell, expander);
     gtk_widget_class_bind_template_child (widget_class, NautilusNameCell, content);
     gtk_widget_class_bind_template_child (widget_class, NautilusNameCell, fixed_height_box);
     gtk_widget_class_bind_template_child (widget_class, NautilusNameCell, icon);
-    gtk_widget_class_bind_template_child (widget_class, NautilusNameCell, emblems_box);
-    gtk_widget_class_bind_template_child (widget_class, NautilusNameCell, labels_box);
+    gtk_widget_class_bind_template_child (widget_class, NautilusNameCell, labels_grid);
 
     gtk_widget_class_bind_template_callback (widget_class, on_label_query_tooltip);
 }
