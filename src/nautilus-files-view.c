@@ -190,6 +190,8 @@ struct _NautilusFilesView
      * after it finishes loading the directory and its view.
      */
     gboolean loading;
+    /* An item already in the model changed, so its sort position may be stale. */
+    gboolean needs_resort;
 
     gboolean in_destruction;
 
@@ -773,7 +775,7 @@ nautilus_files_view_call_set_selection (NautilusFilesView       *self,
         return;
     }
 
-    g_autoptr (NautilusFileList) files_to_find = g_list_copy (selection);
+    g_autoptr (GHashTable) files_to_find = g_hash_table_new (NULL, NULL);
     g_autoptr (GtkBitset) update_set = NULL;
     g_autoptr (GtkBitset) new_selection_set = NULL;
     g_autoptr (GtkBitset) old_selection_set = NULL;
@@ -784,25 +786,24 @@ nautilus_files_view_call_set_selection (NautilusFilesView       *self,
     update_set = gtk_bitset_copy (old_selection_set);
     new_selection_set = gtk_bitset_new_empty ();
 
+    for (GList *l = selection; l != NULL; l = l->next)
+    {
+        g_hash_table_add (files_to_find, l->data);
+    }
+
     /* Convert file list into set of model indices */
     n_items = g_list_model_get_n_items (G_LIST_MODEL (self->model));
-    for (guint position = 0; position < n_items; position++)
+    for (guint position = 0;
+         position < n_items && g_hash_table_size (files_to_find) > 0;
+         position++)
     {
         g_autoptr (NautilusViewItem) item = get_view_item (G_LIST_MODEL (self->model), position);
 
-        GList *link = g_list_find (files_to_find, nautilus_view_item_get_file (item));
-        if (link != NULL)
+        /* Remove found file from the set of files yet to find. */
+        if (g_hash_table_remove (files_to_find, nautilus_view_item_get_file (item)))
         {
             /* Found item to select */
             gtk_bitset_add (new_selection_set, position);
-
-            /* Remove found file from the list of files yet to find. */
-            files_to_find = g_list_delete_link (files_to_find, link);
-            if (files_to_find == NULL)
-            {
-                /* We've matched everything. */
-                break;
-            }
         }
     }
 
@@ -4032,7 +4033,13 @@ still_should_show_file (NautilusFilesView *view,
 static void
 files_view_end_file_changes (NautilusFilesView *self)
 {
-    nautilus_view_model_sort (self->model);
+    /* The sort model keeps added items sorted, so only changes to existing
+     * items, which may affect their sort keys, require a resort. */
+    if (self->needs_resort)
+    {
+        self->needs_resort = FALSE;
+        nautilus_view_model_sort (self->model);
+    }
 
     /* Addition and removal of files modify the empty state */
     nautilus_files_view_update_status_overlay (self);
@@ -4207,6 +4214,7 @@ files_view_file_changed (NautilusFilesView *self,
     if (item != NULL)
     {
         nautilus_view_item_file_changed (item);
+        self->needs_resort = TRUE;
     }
     else
     {
@@ -4230,6 +4238,7 @@ process_pending_files (NautilusFilesView *self)
 
     g_autoptr (GList) pending_additions = NULL;
     g_autoptr (GHashTable) files_removed = g_hash_table_new (NULL, NULL);
+    g_autoptr (GHashTable) files_just_added = g_hash_table_new (NULL, NULL);
 
     remove_fad_duplicates (&files_added);
     remove_fad_duplicates (&files_changed);
@@ -4242,6 +4251,7 @@ process_pending_files (NautilusFilesView *self)
         if (should_add_file)
         {
             pending_additions = g_list_prepend (pending_additions, pending->file);
+            g_hash_table_add (files_just_added, pending->file);
         }
 
         /* Acknowledge the files that were pending to be revealed */
@@ -4267,6 +4277,12 @@ process_pending_files (NautilusFilesView *self)
     {
         FileAndDirectory *pending = node->data;
         gboolean should_show_file = still_should_show_file (self, pending);
+
+        if (should_show_file && g_hash_table_contains (files_just_added, pending->file))
+        {
+            /* Just added with up-to-date info, nothing to update. */
+            continue;
+        }
 
         if (should_show_file)
         {
@@ -4572,8 +4588,7 @@ changes_timeout_callback (gpointer data)
 
     if (time_delta < UPDATE_INTERVAL_RESET * 1000)
     {
-        if (self->update_interval < UPDATE_INTERVAL_MAX &&
-            self->loading)
+        if (self->update_interval < UPDATE_INTERVAL_MAX)
         {
             /* Increase */
             self->update_interval += UPDATE_INTERVAL_INC;

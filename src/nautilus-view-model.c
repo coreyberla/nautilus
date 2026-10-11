@@ -547,7 +547,7 @@ nautilus_view_model_get_sorted_items_for_files (NautilusViewModel *self,
         }
     }
 
-    return g_list_sort_with_data (g_list_copy (items), compare_data_func, self);
+    return g_list_sort_with_data (items, compare_data_func, self);
 }
 
 NautilusViewItem *
