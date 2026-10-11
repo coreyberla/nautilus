@@ -12,6 +12,7 @@
  * BENCH_ZOOM    grid zoom level for BENCH_IMAGES, e.g. "small"
  * BENCH_WIDTH   window width for BENCH_IMAGES (default 1280)
  * BENCH_VIEW    "list" to use the list view for BENCH_IMAGES instead of the grid
+ * BENCH_NOEXT   if set, name the images without an extension
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -294,6 +295,45 @@ measure_thumbnails (const char *label,
     return stats.first_source != NULL ? g_object_ref (stats.first_source) : NULL;
 }
 
+/* Iterate until all files in the view have the given MIME type. */
+static void
+measure_mime_types (const char        *label,
+                    NautilusViewModel *model,
+                    const char        *mime_type,
+                    gint64             start)
+{
+    guint wrong = 0;
+
+    while (ms_since (start) < 60000)
+    {
+        guint n_items = g_list_model_get_n_items (G_LIST_MODEL (model));
+
+        wrong = 0;
+        for (guint i = 0; i < n_items; i++)
+        {
+            g_autoptr (GtkTreeListRow) row = g_list_model_get_item (G_LIST_MODEL (model), i);
+            g_autoptr (NautilusViewItem) item = gtk_tree_list_row_get_item (row);
+
+            if (g_strcmp0 (nautilus_file_get_mime_type (nautilus_view_item_get_file (item)), mime_type) != 0)
+            {
+                wrong++;
+            }
+        }
+
+        if (n_items > 0 && wrong == 0)
+        {
+            break;
+        }
+
+        while (g_main_context_iteration (NULL, FALSE))
+        {
+        }
+        g_usleep (1000);
+    }
+
+    g_print ("%-16s %8.1f ms  (%u not %s)\n", label, ms_since (start), wrong, mime_type);
+}
+
 static GtkScrolledWindow *
 find_scrolled_window (GtkWidget *widget)
 {
@@ -329,7 +369,7 @@ run_image_benchmark (guint n_images)
     g_mkdir (images_dir, 0755);
     for (guint i = 0; i < n_images; i++)
     {
-        g_autofree char *name = g_strdup_printf ("image_%05u.png", i);
+        g_autofree char *name = g_strdup_printf (g_getenv ("BENCH_NOEXT") != NULL ? "image_%05u" : "image_%05u.png", i);
         g_autoptr (GFile) location = g_file_get_child (images_location, name);
 
         /* Old mtimes, as files modified in the last seconds aren't thumbnailed
@@ -423,6 +463,8 @@ run_image_benchmark (guint n_images)
         g_print ("revisit loaded:  %8.1f ms\n", ms_since (start));
         g_clear_object (&first_shown);
         first_shown = measure_thumbnails ("thumbs revisit:", window, start, NULL);
+        measure_mime_types ("types revisit:", nautilus_files_view_get_private_model (view),
+                            "image/png", start);
         if (g_getenv ("BENCH_DEBUG") != NULL)
         {
             /* For matching up with e.g. perf record -k CLOCK_MONOTONIC. */
