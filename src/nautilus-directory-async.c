@@ -859,7 +859,8 @@ dequeue_pending_idle_callback (gpointer callback_data)
                 /* We consider this newly added even if its in the list.
                  * This can happen if someone called nautilus_file_get_by_uri()
                  * on a file in the folder before the add signal was
-                 * emitted */
+                 * emitted. Use the info we just got, as it may have none. */
+                nautilus_file_update_info (file, file_info);
                 nautilus_file_ref (file);
                 file->details->is_added = TRUE;
                 added_files = g_list_prepend (added_files, file);
