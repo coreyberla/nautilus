@@ -122,7 +122,7 @@ main (int   argc,
     double cpu_start;
 
     gtk_init ();
-    g_log_set_debug_enabled (FALSE);
+    g_log_set_debug_enabled (g_getenv ("BENCH_DEBUG") != NULL);
     nautilus_register_resource ();
     nautilus_ensure_extension_points ();
     nautilus_global_preferences_init ();
