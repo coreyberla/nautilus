@@ -13,6 +13,7 @@
  * BENCH_WIDTH   window width for BENCH_IMAGES (default 1280)
  * BENCH_VIEW    "list" to use the list view for BENCH_IMAGES instead of the grid
  * BENCH_NOEXT   if set, name the images without an extension
+ * BENCH_COUNT_WIDGETS  if set, print the widgets in the window by type
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -334,6 +335,54 @@ measure_mime_types (const char        *label,
     g_print ("%-16s %8.1f ms  (%u not %s)\n", label, ms_since (start), wrong, mime_type);
 }
 
+static void
+count_widgets (GtkWidget  *widget,
+               GHashTable *counts)
+{
+    const char *type = G_OBJECT_TYPE_NAME (widget);
+
+    g_hash_table_insert (counts, (gpointer) type,
+                         GUINT_TO_POINTER (GPOINTER_TO_UINT (g_hash_table_lookup (counts, type)) + 1));
+
+    for (GtkWidget *child = gtk_widget_get_first_child (widget);
+         child != NULL;
+         child = gtk_widget_get_next_sibling (child))
+    {
+        count_widgets (child, counts);
+    }
+}
+
+static gint
+compare_counts (gconstpointer a,
+                gconstpointer b,
+                gpointer      counts)
+{
+    return GPOINTER_TO_INT (g_hash_table_lookup (counts, *(gpointer *) b)) -
+           GPOINTER_TO_INT (g_hash_table_lookup (counts, *(gpointer *) a));
+}
+
+static void
+print_widget_counts (GtkWidget *window)
+{
+    g_autoptr (GHashTable) counts = g_hash_table_new (g_str_hash, g_str_equal);
+    g_autoptr (GPtrArray) types = NULL;
+    guint total = 0;
+
+    count_widgets (window, counts);
+    types = g_hash_table_get_keys_as_ptr_array (counts);
+    g_ptr_array_sort_with_data (types, compare_counts, counts);
+    for (guint i = 0; i < types->len; i++)
+    {
+        total += GPOINTER_TO_UINT (g_hash_table_lookup (counts, types->pdata[i]));
+    }
+    g_print ("widgets in window: %u\n", total);
+    for (guint i = 0; i < MIN (types->len, 20); i++)
+    {
+        g_print ("  %5u %s\n", GPOINTER_TO_UINT (g_hash_table_lookup (counts, types->pdata[i])),
+                 (const char *) types->pdata[i]);
+    }
+}
+
 static GtkScrolledWindow *
 find_scrolled_window (GtkWidget *widget)
 {
@@ -430,6 +479,10 @@ run_image_benchmark (guint n_images)
         g_print ("first items:    %s\n", first->str);
     }
     g_autoptr (GFile) first_shown = measure_thumbnails ("thumbs cold:", window, start, NULL);
+    if (g_getenv ("BENCH_COUNT_WIDGETS") != NULL)
+    {
+        print_widget_counts (window);
+    }
 
     /* 2. Scroll to the end, where thumbnails aren't cached either. */
     g_autoptr (GFile) first_shown_before_scroll = g_object_ref (first_shown);
