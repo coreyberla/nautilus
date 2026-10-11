@@ -423,6 +423,12 @@ run_image_benchmark (guint n_images)
         g_print ("revisit loaded:  %8.1f ms\n", ms_since (start));
         g_clear_object (&first_shown);
         first_shown = measure_thumbnails ("thumbs revisit:", window, start, NULL);
+        if (g_getenv ("BENCH_DEBUG") != NULL)
+        {
+            /* For matching up with e.g. perf record -k CLOCK_MONOTONIC. */
+            g_printerr ("REVISIT-WINDOW %" G_GINT64_FORMAT " %" G_GINT64_FORMAT "\n",
+                        start, g_get_monotonic_time ());
+        }
     }
 
     gtk_window_destroy (GTK_WINDOW (window));
