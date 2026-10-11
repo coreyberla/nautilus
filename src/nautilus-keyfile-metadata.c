@@ -252,10 +252,9 @@ nautilus_keyfile_metadata_update_from_keyfile (NautilusFile *file,
                                                const char   *keyfile_filename,
                                                const gchar  *name)
 {
-    gchar **keys, **values;
+    gchar **keys;
     const gchar *actual_values[2];
     const gchar *key, *value;
-    gchar *gio_key;
     gsize length, values_length;
     GKeyFile *keyfile;
     GFileInfo *info;
@@ -277,6 +276,9 @@ nautilus_keyfile_metadata_update_from_keyfile (NautilusFile *file,
 
     for (guint idx = 0; idx < length; idx++)
     {
+        g_auto (GStrv) values = NULL;
+        g_autofree gchar *gio_key = NULL;
+
         key = keys[idx];
         values = g_key_file_get_string_list (keyfile,
                                              name,
@@ -328,9 +330,6 @@ nautilus_keyfile_metadata_update_from_keyfile (NautilusFile *file,
                                                gio_key,
                                                values);
         }
-
-        g_free (gio_key);
-        g_strfreev (values);
     }
 
     res = nautilus_file_update_metadata_from_info (file, info);
