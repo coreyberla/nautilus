@@ -7569,8 +7569,12 @@ extract_job_on_progress (AutoarExtractor *extractor,
 
     archive_total_decompressed_size = autoar_extractor_get_total_size (extractor);
 
-    archive_decompress_progress = (gdouble) archive_current_decompressed_size /
-                                  (gdouble) archive_total_decompressed_size;
+    archive_decompress_progress = 0;
+    if (archive_total_decompressed_size > 0)
+    {
+        archive_decompress_progress = (gdouble) archive_current_decompressed_size /
+                                      (gdouble) archive_total_decompressed_size;
+    }
 
     archive_weight = 0;
     if (extract_job->total_compressed_size)
@@ -7936,15 +7940,25 @@ extract_task_thread_func (GTask        *task,
 
         if (!extract_job->extraction_failed)
         {
-            extract_job->base_progress += (gdouble) extract_job->archive_compressed_size /
-                                          (gdouble) extract_job->total_compressed_size;
+            if (extract_job->total_compressed_size > 0)
+            {
+                extract_job->base_progress += (gdouble) extract_job->archive_compressed_size /
+                                              (gdouble) extract_job->total_compressed_size;
+            }
         }
         else
         {
             extract_job->total_files--;
             extract_job->base_progress *= extract_job->total_compressed_size;
             extract_job->total_compressed_size -= extract_job->archive_compressed_size;
-            extract_job->base_progress /= extract_job->total_compressed_size;
+            if (extract_job->total_compressed_size > 0)
+            {
+                extract_job->base_progress /= extract_job->total_compressed_size;
+            }
+            else
+            {
+                extract_job->base_progress = 0;
+            }
         }
     }
 
