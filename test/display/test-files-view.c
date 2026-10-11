@@ -1265,6 +1265,53 @@ test_load_dir (void)
     test_clear_tmp_dir ();
 }
 
+static void
+test_load_dir_images (void)
+{
+    g_autoptr (NautilusWindowSlot) slot = NULL;
+    g_autoptr (NautilusFilesView) files_view = create_view_with_slot (NAUTILUS_MODE_BROWSE,
+                                                                      NAUTILUS_VIEW_GRID_ID,
+                                                                      &slot);
+    NautilusViewModel *model = nautilus_files_view_get_private_model (files_view);
+    g_autoptr (GFile) tmp_location = g_file_new_for_path (test_get_tmp_dir ());
+    const guint image_count = 3000;
+    g_autoptr (GPtrArray) image_arr = g_ptr_array_new_full (image_count,
+                                                            (GDestroyNotify) nautilus_file_unref);
+
+    for (guint i = 0; i < image_count; i++)
+    {
+        g_autofree gchar *file_name = g_strdup_printf ("image_%04u.png", i);
+        g_autoptr (GFile) location = g_file_get_child (tmp_location, file_name);
+
+        make_image_file (location, FALSE);
+        g_ptr_array_add (image_arr, nautilus_file_get (location));
+    }
+
+    nautilus_files_view_set_location (files_view, tmp_location);
+
+    /* Loading this many files takes more main loop iterations than
+     * ITER_CONTEXT_WHILE allows, so bound it by time instead. */
+    gint64 deadline = g_get_monotonic_time () + 60 * G_USEC_PER_SEC;
+    while (nautilus_files_view_get_loading (files_view))
+    {
+        g_assert_cmpint (g_get_monotonic_time (), <, deadline);
+        g_main_context_iteration (NULL, TRUE);
+    }
+
+    g_assert_cmpuint (g_list_model_get_n_items (G_LIST_MODEL (model)), ==, image_count);
+
+    for (guint i = 0; i < image_arr->len; i++)
+    {
+        NautilusFile *file = image_arr->pdata[i];
+
+        g_assert_nonnull (nautilus_view_model_get_item_for_file (model, file));
+        g_assert_true (nautilus_file_check_if_ready (file, NAUTILUS_ATTRIBUTE_INFO));
+        g_assert_cmpstr (nautilus_file_get_mime_type (file), ==, "image/png");
+    }
+
+    test_clear_tmp_dir ();
+}
+
 int
 main (int   argc,
       char *argv[])
@@ -1290,6 +1337,8 @@ main (int   argc,
 
     g_test_add_func ("/view/load_dir",
                      test_load_dir);
+    g_test_add_func ("/view/load_dir/images",
+                     test_load_dir_images);
     g_test_add_func ("/view/add_files",
                      test_add_files);
     g_test_add_func ("/view/remove_files",
