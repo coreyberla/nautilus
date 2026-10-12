@@ -16,6 +16,9 @@
  * BENCH_COUNT_WIDGETS  if set, print the widgets in the window by type
  * BENCH_SCREENSHOT     save a PNG of the window to this path after loading
  * BENCH_SYMLINKS       number of symlinks to images to add, which show emblems
+ * BENCH_PERF_CTL       perf control FIFO; profiling is enabled only during one
+ *                      phase, e.g. perf record -D -1 --control fifo:PATH
+ * BENCH_PERF_PHASE     phase to profile: "load" (default) or "settle"
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -44,6 +47,7 @@ typedef struct
 {
     gint64 start;
     gint64 total;
+    gint64 last;
     guint count;
 } Timer;
 
@@ -56,7 +60,8 @@ end_changes_before (Timer *timer)
 static void
 end_changes_after (Timer *timer)
 {
-    timer->total += g_get_monotonic_time () - timer->start;
+    timer->last = g_get_monotonic_time ();
+    timer->total += timer->last - timer->start;
     timer->count++;
 }
 
@@ -141,6 +146,27 @@ cpu_ms (void)
            usage.ru_stime.tv_sec * 1000.0 + usage.ru_stime.tv_usec / 1000.0;
 }
 
+/* Turn perf recording on or off, for profiling a single phase. */
+static void
+perf_control (const char *phase,
+              const char *command)
+{
+    const char *path = g_getenv ("BENCH_PERF_CTL");
+    const char *profiled = g_getenv ("BENCH_PERF_PHASE");
+
+    if (path != NULL && g_strcmp0 (phase, profiled != NULL ? profiled : "load") == 0)
+    {
+        g_autofree char *line = g_strconcat (command, "\n", NULL);
+        FILE *fifo = fopen (path, "w");
+
+        if (fifo != NULL)
+        {
+            fputs (line, fifo);
+            fclose (fifo);
+        }
+    }
+}
+
 static double
 ms_since (gint64 start)
 {
@@ -150,17 +176,38 @@ ms_since (gint64 start)
 #define ITERATE_WHILE(CONDITION) \
     while (CONDITION) { g_main_context_iteration (NULL, TRUE); }
 
-/* Run the main loop until nothing has happened for quiet_ms. */
+static gboolean ticked;
+
+static gboolean
+on_quiet_tick (gpointer user_data)
+{
+    ticked = TRUE;
+
+    return G_SOURCE_CONTINUE;
+}
+
+/* Run the main loop until nothing has happened for quiet_ms. Block while
+ * waiting, as the app would, so that work hopping between threads and the
+ * main loop isn't slowed down by polling. The tick has the lowest priority,
+ * so an iteration dispatching it did nothing else. */
 static void
 iterate_until_quiet (guint quiet_ms,
                      guint max_ms)
 {
     gint64 start = g_get_monotonic_time ();
     gint64 last_event = start;
+    g_autoptr (GSource) tick = g_timeout_source_new (10);
+
+    g_source_set_priority (tick, G_PRIORITY_LOW);
+    g_source_set_callback (tick, on_quiet_tick, NULL, NULL);
+    g_source_attach (tick, NULL);
 
     while (ms_since (start) < max_ms)
     {
-        if (g_main_context_iteration (NULL, FALSE))
+        ticked = FALSE;
+        g_main_context_iteration (NULL, TRUE);
+
+        if (!ticked)
         {
             last_event = g_get_monotonic_time ();
         }
@@ -168,11 +215,9 @@ iterate_until_quiet (guint quiet_ms,
         {
             break;
         }
-        else
-        {
-            g_usleep (1000);
-        }
     }
+
+    g_source_destroy (tick);
 }
 
 typedef struct
@@ -632,11 +677,14 @@ main (int   argc,
     g_signal_connect (view, "file-changed", G_CALLBACK (count_changed), &changed);
 
     /* 1. Cold load */
+    perf_control ("load", "enable");
     start = g_get_monotonic_time ();
+    cpu_start = cpu_ms ();
     nautilus_files_view_set_location (view, tmp_location);
     ITERATE_WHILE (nautilus_files_view_get_loading (view));
-    g_print ("load:            %8.1f ms  (%u items, end-file-changes %.1f ms in %u calls)\n",
-             ms_since (start), g_list_model_get_n_items (G_LIST_MODEL (model)),
+    perf_control ("load", "disable");
+    g_print ("load:            %8.1f ms  (main thread CPU %.1f ms, %u items, end-file-changes %.1f ms in %u calls)\n",
+             ms_since (start), cpu_ms () - cpu_start, g_list_model_get_n_items (G_LIST_MODEL (model)),
              end_changes.total / 1000.0, end_changes.count);
 
     /* 2. Post-load settling: subfolder item counts etc. trickle in. */
@@ -644,9 +692,13 @@ main (int   argc,
     changed = 0;
     start = g_get_monotonic_time ();
     cpu_start = cpu_ms ();
+    perf_control ("settle", "enable");
     iterate_until_quiet (3000, 120000);
-    g_print ("settle:          %8.1f ms  (main thread CPU %.1f ms, %u file-changed, end-file-changes %.1f ms in %u calls)\n",
-             ms_since (start) - 3000, cpu_ms () - cpu_start, changed, end_changes.total / 1000.0, end_changes.count);
+    perf_control ("settle", "disable");
+    g_print ("settle:          %8.1f ms  (last change after %.1f ms, main thread CPU %.1f ms, %u file-changed, end-file-changes %.1f ms in %u calls)\n",
+             ms_since (start) - 3000,
+             end_changes.count > 0 ? (end_changes.last - start) / 1000.0 : 0.0,
+             cpu_ms () - cpu_start, changed, end_changes.total / 1000.0, end_changes.count);
 
     /* 3. Touch files after load. */
     end_changes = (Timer) { 0 };
@@ -681,9 +733,11 @@ main (int   argc,
     nautilus_files_view_set_location (view, home);
     ITERATE_WHILE (nautilus_files_view_get_loading (view));
     end_changes = (Timer) { 0 };
+    perf_control ("load", "enable");
     start = g_get_monotonic_time ();
     nautilus_files_view_set_location (view, tmp_location);
     ITERATE_WHILE (nautilus_files_view_get_loading (view));
+    perf_control ("load", "disable");
     g_print ("revisit items:   %u NautilusFile objects finalized\n", finalized_files);
     g_print ("revisit:         %8.1f ms  (end-file-changes %.1f ms in %u calls)\n",
              ms_since (start), end_changes.total / 1000.0, end_changes.count);
