@@ -192,6 +192,8 @@ struct _NautilusFilesView
     gboolean loading;
     /* An item already in the model changed, so its sort position may be stale. */
     gboolean needs_resort;
+    /* Files being added by process_pending_files(), which are sorted already. */
+    GHashTable *files_just_added;
 
     gboolean in_destruction;
 
@@ -4214,7 +4216,11 @@ files_view_file_changed (NautilusFilesView *self,
     if (item != NULL)
     {
         nautilus_view_item_file_changed (item);
-        self->needs_resort = TRUE;
+        if (self->files_just_added == NULL ||
+            !g_hash_table_contains (self->files_just_added, file))
+        {
+            self->needs_resort = TRUE;
+        }
     }
     else
     {
@@ -4267,6 +4273,18 @@ process_pending_files (NautilusFilesView *self)
 
     if (pending_additions != NULL)
     {
+        /* The sort model inserts these with their current sort keys, so
+         * changes queued while they were pending, like subfolder item counts
+         * while loading, don't call for a resort. */
+        self->files_just_added = g_hash_table_new (NULL, NULL);
+        for (GList *l = pending_additions; l != NULL; l = l->next)
+        {
+            if (nautilus_view_model_get_item_for_file (self->model, l->data) == NULL)
+            {
+                g_hash_table_add (self->files_just_added, l->data);
+            }
+        }
+
         g_signal_emit (self,
                        signals[ADD_FILES], 0, pending_additions);
     }
@@ -4301,6 +4319,8 @@ process_pending_files (NautilusFilesView *self)
             g_hash_table_remove (self->awaiting_acknowledge, pending->file);
         }
     }
+
+    g_clear_pointer (&self->files_just_added, g_hash_table_unref);
 
     if (g_hash_table_size (files_removed) > 0)
     {
