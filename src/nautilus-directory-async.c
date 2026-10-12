@@ -85,9 +85,13 @@ struct DirectoryCountState
     NautilusDirectory *directory;
     NautilusFile *count_file;
     GCancellable *cancellable;
-    GFileEnumerator *enumerator;
-    int file_count;
 };
+
+typedef struct
+{
+    guint total;
+    guint hidden;
+} DirectoryCount;
 
 struct DeepCountState
 {
@@ -755,7 +759,7 @@ show_hidden_files_changed_callback (gpointer callback_data)
 }
 
 static gboolean
-should_skip_file (GFileInfo *info)
+get_show_hidden_files (void)
 {
     static gboolean show_hidden_files_changed_callback_installed = FALSE;
 
@@ -773,13 +777,20 @@ should_skip_file (GFileInfo *info)
         show_hidden_files_changed_callback (NULL);
     }
 
-    if (!show_hidden_files)
-    {
-        return g_file_info_get_attribute_boolean (info, G_FILE_ATTRIBUTE_STANDARD_IS_HIDDEN) ||
-               g_file_info_get_attribute_boolean (info, G_FILE_ATTRIBUTE_STANDARD_IS_BACKUP);
-    }
+    return show_hidden_files;
+}
 
-    return FALSE;
+static gboolean
+is_hidden_or_backup (GFileInfo *info)
+{
+    return g_file_info_get_attribute_boolean (info, G_FILE_ATTRIBUTE_STANDARD_IS_HIDDEN) ||
+           g_file_info_get_attribute_boolean (info, G_FILE_ATTRIBUTE_STANDARD_IS_BACKUP);
+}
+
+static gboolean
+should_skip_file (GFileInfo *info)
+{
+    return !get_show_hidden_files () && is_hidden_or_backup (info);
 }
 
 static void
@@ -2371,25 +2382,6 @@ directory_count_stop (NautilusDirectory *directory)
     }
 }
 
-static guint
-count_non_skipped_files (GList *list)
-{
-    guint count;
-    GList *node;
-    GFileInfo *info;
-
-    count = 0;
-    for (node = list; node != NULL; node = node->next)
-    {
-        info = node->data;
-        if (!should_skip_file (info))
-        {
-            count += 1;
-        }
-    }
-    return count;
-}
-
 static void
 count_children_done (NautilusDirectory *directory,
                      NautilusFile      *count_file,
@@ -2438,37 +2430,70 @@ count_children_done (NautilusDirectory *directory,
 static void
 directory_count_state_free (DirectoryCountState *state)
 {
-    if (state->enumerator)
-    {
-        if (!g_file_enumerator_is_closed (state->enumerator))
-        {
-            g_file_enumerator_close_async (state->enumerator,
-                                           0, NULL, NULL, NULL);
-        }
-        g_object_unref (state->enumerator);
-    }
     g_object_unref (state->cancellable);
     nautilus_directory_unref (state->directory);
     g_free (state);
 }
 
+/* Counts in one go in a thread, rather than enumerating asynchronously, which
+ * would take several round trips to the main thread for every folder. */
 static void
-count_more_files_callback (GObject      *source_object,
-                           GAsyncResult *res,
-                           gpointer      user_data)
+count_children_thread (GTask        *task,
+                       gpointer      source_object,
+                       gpointer      task_data,
+                       GCancellable *cancellable)
 {
-    DirectoryCountState *state;
-    NautilusDirectory *directory;
-    GError *error;
-    GList *files;
+    GFile *location = source_object;
+    g_autoptr (GFileEnumerator) enumerator = NULL;
+    g_autoptr (GError) error = NULL;
+    g_autofree DirectoryCount *count = g_new0 (DirectoryCount, 1);
 
-    state = user_data;
-    directory = state->directory;
+    enumerator = g_file_enumerate_children (location,
+                                            G_FILE_ATTRIBUTE_STANDARD_NAME ","
+                                            G_FILE_ATTRIBUTE_STANDARD_IS_HIDDEN ","
+                                            G_FILE_ATTRIBUTE_STANDARD_IS_BACKUP,
+                                            G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS,
+                                            cancellable,
+                                            &error);
+    if (enumerator == NULL)
+    {
+        g_task_return_error (task, g_steal_pointer (&error));
+        return;
+    }
+
+    /* Like loading a folder, count what was listed before any error. */
+    while (TRUE)
+    {
+        GFileInfo *info;
+
+        if (!g_file_enumerator_iterate (enumerator, &info, NULL, cancellable, NULL) ||
+            info == NULL)
+        {
+            break;
+        }
+
+        count->total++;
+        if (is_hidden_or_backup (info))
+        {
+            count->hidden++;
+        }
+    }
+
+    g_task_return_pointer (task, g_steal_pointer (&count), g_free);
+}
+
+static void
+count_children_callback (GObject      *source_object,
+                         GAsyncResult *res,
+                         gpointer      user_data)
+{
+    DirectoryCountState *state = user_data;
+    NautilusDirectory *directory = state->directory;
+    g_autofree DirectoryCount *count = NULL;
 
     if (g_cancellable_is_cancelled (state->cancellable))
     {
         /* Operation was cancelled. Bail out */
-
         async_job_end (directory, "directory count");
         nautilus_directory_async_state_changed (directory);
 
@@ -2480,84 +2505,18 @@ count_more_files_callback (GObject      *source_object,
     g_assert (directory->details->count_in_progress != NULL);
     g_assert (directory->details->count_in_progress == state);
 
-    error = NULL;
-    files = g_file_enumerator_next_files_finish (state->enumerator,
-                                                 res, &error);
-
-    state->file_count += count_non_skipped_files (files);
-
-    if (files == NULL)
+    count = g_task_propagate_pointer (G_TASK (res), NULL);
+    if (count == NULL)
     {
-        count_children_done (directory, state->count_file,
-                             TRUE, state->file_count);
-        directory_count_state_free (state);
+        count_children_done (directory, state->count_file, FALSE, 0);
     }
     else
     {
-        g_file_enumerator_next_files_async (state->enumerator,
-                                            DIRECTORY_LOAD_ITEMS_PER_CALLBACK,
-                                            G_PRIORITY_DEFAULT,
-                                            state->cancellable,
-                                            count_more_files_callback,
-                                            state);
+        count_children_done (directory, state->count_file, TRUE,
+                             get_show_hidden_files () ? count->total : count->total - count->hidden);
     }
 
-    g_list_free_full (files, g_object_unref);
-
-    if (error)
-    {
-        g_error_free (error);
-    }
-}
-
-static void
-count_children_callback (GObject      *source_object,
-                         GAsyncResult *res,
-                         gpointer      user_data)
-{
-    DirectoryCountState *state;
-    GFileEnumerator *enumerator;
-    NautilusDirectory *directory;
-    GError *error;
-
-    state = user_data;
-
-    if (g_cancellable_is_cancelled (state->cancellable))
-    {
-        /* Operation was cancelled. Bail out */
-        directory = state->directory;
-
-        async_job_end (directory, "directory count");
-        nautilus_directory_async_state_changed (directory);
-
-        directory_count_state_free (state);
-
-        return;
-    }
-
-    error = NULL;
-    enumerator = g_file_enumerate_children_finish (G_FILE (source_object),
-                                                   res, &error);
-
-    if (enumerator == NULL)
-    {
-        count_children_done (state->directory,
-                             state->count_file,
-                             FALSE, 0);
-        g_error_free (error);
-        directory_count_state_free (state);
-        return;
-    }
-    else
-    {
-        state->enumerator = enumerator;
-        g_file_enumerator_next_files_async (state->enumerator,
-                                            DIRECTORY_LOAD_ITEMS_PER_CALLBACK,
-                                            G_PRIORITY_DEFAULT,
-                                            state->cancellable,
-                                            count_more_files_callback,
-                                            state);
-    }
+    directory_count_state_free (state);
 }
 
 static void
@@ -2603,15 +2562,10 @@ directory_count_start (NautilusDirectory *directory,
         g_debug ("load_directory called to get shallow file count for %s", uri);
     }
 
-    g_file_enumerate_children_async (location,
-                                     G_FILE_ATTRIBUTE_STANDARD_NAME ","
-                                     G_FILE_ATTRIBUTE_STANDARD_IS_HIDDEN ","
-                                     G_FILE_ATTRIBUTE_STANDARD_IS_BACKUP,
-                                     G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS,     /* flags */
-                                     G_PRIORITY_DEFAULT,     /* prio */
-                                     state->cancellable,
-                                     count_children_callback,
-                                     state);
+    g_autoptr (GTask) task = g_task_new (location, state->cancellable,
+                                         count_children_callback, state);
+    g_task_set_source_tag (task, directory_count_start);
+    g_task_run_in_thread (task, count_children_thread);
     g_object_unref (location);
 }
 
