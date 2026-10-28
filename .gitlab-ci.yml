@@ -55,7 +55,7 @@ workflow:
 .fedora:
     variables:
         FDO_DISTRIBUTION_VERSION: rawhide
-        BASE_TAG: '2026-09-26.0'
+        BASE_TAG: '2026-10-28.0'
         FDO_DISTRIBUTION_COMPRESSION_FORMAT: zstd:chunked
         FDO_DISTRIBUTION_PACKAGES:
             git
@@ -71,6 +71,7 @@ workflow:
             gtk4-devel
             libadwaita-devel
             libselinux-devel
+            sysprof-capture-devel
             gettext
             libgexiv2-devel
             localsearch
@@ -181,7 +182,7 @@ fedora_rawhide@x86_64:
         - .vars-devel
     stage: test
     script:
-        - meson setup -Dextensions=false -Db_coverage=true -Dtests=all $MESON_BUILD_DIR
+        - meson setup -Dextensions=false -Dinspector-page=true -Db_coverage=true -Dtests=all $MESON_BUILD_DIR
         - meson compile -C $MESON_BUILD_DIR
         # Run the tests inside an XWayland server inside a headless Wayland compositor.
         # FIXME: Use wlheadless-run again, which broke during an image update
@@ -204,7 +205,7 @@ fedora_rawhide@arm64:
           when: always
         - allow_failure: true
     script:
-        - meson setup -Dextensions=false -Db_coverage=true -Dtests=all $MESON_BUILD_DIR
+        - meson setup -Dextensions=false -Dinspector-page=true -Db_coverage=true -Dtests=all $MESON_BUILD_DIR
         - meson compile -C $MESON_BUILD_DIR
         # Run the tests inside an XWayland server inside a headless Wayland compositor.
         # FIXME: Use wlheadless-run again, which broke during an image update
