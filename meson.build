@@ -150,6 +150,12 @@ cloudproviders = dependency(
   version: '>= 0.3.1',
   required: get_option('cloudproviders'),
 )
+# Optional, to add marks to the Sysprof timeline.
+if get_option('inspector-page')
+  sysprof = dependency('sysprof-capture-4', version: '>= 3.38', required: false)
+else
+  sysprof = dependency('', required: false)
+endif
 if get_option('extensions')
   gexiv = dependency('gexiv2-0.16', version: '>= 0.16.0')
   gdkpixbuf = dependency('gdk-pixbuf-2.0', version: '>= 2.30.0')
@@ -198,6 +204,7 @@ conf.set_quoted('VERSION', version_string)
 conf.set('HAVE_SELINUX', selinux.found())
 conf.set('HAVE_CLOUDPROVIDERS', cloudproviders.found())
 conf.set('ENABLE_INSPECTOR_PAGE', get_option('inspector-page'))
+conf.set('HAVE_SYSPROF', sysprof.found())
 
 conf.set('HAVE_MALLOC_TRIM', cc.has_function('malloc_trim'))
 
@@ -273,6 +280,7 @@ summary(
     'Cloud providers support': cloudproviders.found(),
     'SELinux support': selinux.found(),
     'Inspector page': get_option('inspector-page'),
+    'Sysprof marks': sysprof.found(),
   },
   section: 'Features',
   bool_yn: true,

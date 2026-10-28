@@ -12,7 +12,9 @@
 G_BEGIN_DECLS
 
 /* Statistics for the GTK Inspector page are only collected while the
- * inspector is shown, and never when built without -Dinspector-page=true.
+ * inspector is shown or while Sysprof is recording, and never when built
+ * without -Dinspector-page=true. While Sysprof is recording, timed operations
+ * are also added to its timeline as marks.
  *
  * Timers should only be started when NAUTILUS_INSPECTOR_STATS_ENABLED() is
  * true. When built without the page, it is a constant FALSE and the recording
@@ -94,9 +96,21 @@ typedef struct
 #ifdef ENABLE_INSPECTOR_PAGE
 
 extern gboolean nautilus_inspector_stats_enabled;
+extern gboolean nautilus_inspector_stats_profiling;
 extern NautilusInspectorStats nautilus_inspector_stats;
 
 #define NAUTILUS_INSPECTOR_STATS_ENABLED() G_UNLIKELY (nautilus_inspector_stats_enabled)
+#define NAUTILUS_INSPECTOR_STATS_PROFILING() G_UNLIKELY (nautilus_inspector_stats_profiling)
+
+/* Adds a mark from begin to end, from g_get_monotonic_time(), to the Sysprof
+ * timeline. The message is only formatted while Sysprof is recording. */
+#define NAUTILUS_INSPECTOR_STATS_MARK(begin, end, name, ...) \
+        G_STMT_START { \
+            if (NAUTILUS_INSPECTOR_STATS_PROFILING ()) \
+            { \
+                nautilus_inspector_stats_mark ((begin), (end), (name), __VA_ARGS__); \
+            } \
+        } G_STMT_END
 
 #define NAUTILUS_INSPECTOR_STATS_ADD(field, n) \
         G_STMT_START { \
@@ -110,7 +124,14 @@ extern NautilusInspectorStats nautilus_inspector_stats;
 #define NAUTILUS_INSPECTOR_STATS_ADD_TIMING(field, duration) \
         nautilus_inspector_stats_add_timing (&nautilus_inspector_stats.field, (duration))
 
+void nautilus_inspector_stats_init (void);
 void nautilus_inspector_stats_set_shown (gboolean shown);
+
+void nautilus_inspector_stats_mark (gint64      begin,
+                                    gint64      end,
+                                    const char *name,
+                                    const char *message_format,
+                                    ...) G_GNUC_PRINTF (4, 5);
 
 void nautilus_inspector_stats_add_timing (NautilusTimingStats *timing,
                                           gint64               duration);
@@ -143,6 +164,8 @@ const NautilusSearchStats *nautilus_inspector_stats_get_shell_search (void);
 #else
 
 #define NAUTILUS_INSPECTOR_STATS_ENABLED() FALSE
+#define NAUTILUS_INSPECTOR_STATS_PROFILING() FALSE
+#define NAUTILUS_INSPECTOR_STATS_MARK(begin, end, name, ...) G_STMT_START { } G_STMT_END
 /* The arguments are still type-checked, but never evaluated. */
 #define NAUTILUS_INSPECTOR_STATS_ADD(field, n) G_STMT_START { if (0) { (void) (n); } } G_STMT_END
 #define NAUTILUS_INSPECTOR_STATS_ADD_TIMING(field, duration) G_STMT_START { if (0) { (void) (duration); } } G_STMT_END

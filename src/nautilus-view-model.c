@@ -684,6 +684,10 @@ nautilus_view_model_add_items (NautilusViewModel *self,
 
     self->last_add_sort_time = sorted_time - start_time;
     self->last_add_splice_time = timed ? g_get_monotonic_time () - sorted_time : 0;
+
+    NAUTILUS_INSPECTOR_STATS_MARK (start_time, sorted_time, "Sort Items", "%u items", g_list_length (items));
+    NAUTILUS_INSPECTOR_STATS_MARK (sorted_time, sorted_time + self->last_add_splice_time,
+                                   "Splice Items", "%u items", g_list_length (items));
 }
 
 void

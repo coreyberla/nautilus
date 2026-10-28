@@ -725,6 +725,8 @@ thumbnail_generated_cb (GObject      *source_object,
         gint64 end_time = g_get_monotonic_time ();
 
         NAUTILUS_INSPECTOR_STATS_ADD_TIMING (thumbnail_generation, end_time - info->start_time);
+        NAUTILUS_INSPECTOR_STATS_MARK (info->start_time, end_time, "Generate Thumbnail", "%s%s",
+                                       info->image_uri, pixbuf == NULL ? ", failed" : "");
     }
 
     if (pixbuf != NULL)
@@ -840,6 +842,8 @@ thumbnail_starter_cb (gpointer data)
         {
             info->start_time = g_get_monotonic_time ();
             NAUTILUS_INSPECTOR_STATS_ADD_TIMING (thumbnail_wait, info->start_time - info->enqueue_time);
+            NAUTILUS_INSPECTOR_STATS_MARK (info->enqueue_time, info->start_time, "Wait for Thumbnail", "%s",
+                                           info->image_uri);
         }
 
         gnome_desktop_thumbnail_factory_generate_thumbnail_async (thumbnail_factory,

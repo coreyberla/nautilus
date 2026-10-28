@@ -11,8 +11,25 @@
 #include <glib-object.h>
 #include <string.h>
 
+#ifdef HAVE_SYSPROF
+#include <sysprof-capture.h>
+#endif
+
 gboolean nautilus_inspector_stats_enabled = FALSE;
+gboolean nautilus_inspector_stats_profiling = FALSE;
 NautilusInspectorStats nautilus_inspector_stats = { 0 };
+
+static gboolean inspector_shown = FALSE;
+
+static const char *extension_call_names[] =
+{
+    [NAUTILUS_EXTENSION_CALL_INFO] = "File Info",
+    [NAUTILUS_EXTENSION_CALL_FILE_MENU] = "File Menu Items",
+    [NAUTILUS_EXTENSION_CALL_BACKGROUND_MENU] = "Background Menu Items",
+    [NAUTILUS_EXTENSION_CALL_COLUMNS] = "Columns",
+    [NAUTILUS_EXTENSION_CALL_PROPERTIES] = "Properties",
+};
+G_STATIC_ASSERT (G_N_ELEMENTS (extension_call_names) == NAUTILUS_EXTENSION_N_CALLS);
 
 /* Extension provider → NautilusExtensionStats. Providers live as long as the
  * application, so they are not referenced. */
@@ -21,9 +38,46 @@ static GHashTable *extension_stats = NULL;
 static NautilusSearchStats *shell_search = NULL;
 
 void
+nautilus_inspector_stats_init (void)
+{
+#ifdef HAVE_SYSPROF
+    /* Sysprof sets up its collector before starting the application. */
+    nautilus_inspector_stats_profiling = sysprof_collector_is_active ();
+#endif
+    nautilus_inspector_stats_enabled = inspector_shown || nautilus_inspector_stats_profiling;
+}
+
+void
 nautilus_inspector_stats_set_shown (gboolean shown)
 {
-    nautilus_inspector_stats_enabled = shown;
+    inspector_shown = shown;
+    nautilus_inspector_stats_enabled = inspector_shown || nautilus_inspector_stats_profiling;
+}
+
+void
+nautilus_inspector_stats_mark (gint64      begin,
+                               gint64      end,
+                               const char *name,
+                               const char *message_format,
+                               ...)
+{
+#ifdef HAVE_SYSPROF
+    va_list args;
+
+    if (begin == 0 || end < begin)
+    {
+        return;
+    }
+
+    /* Both are monotonic clocks, but anchor on the current time in case
+     * Sysprof uses a different one. */
+    gint64 now = g_get_monotonic_time ();
+    gint64 begin_nsec = SYSPROF_CAPTURE_CURRENT_TIME - (now - begin) * 1000;
+
+    va_start (args, message_format);
+    sysprof_collector_mark_vprintf (begin_nsec, (end - begin) * 1000, "Files", name, message_format, args);
+    va_end (args);
+#endif
 }
 
 void
@@ -60,7 +114,11 @@ nautilus_inspector_stats_record_extension_call (gpointer              provider,
                                                 NautilusExtensionCall call,
                                                 gint64                duration)
 {
+    gint64 now = g_get_monotonic_time ();
+
     nautilus_inspector_stats_add_timing (&ensure_extension_stats (provider)->calls[call], duration);
+    NAUTILUS_INSPECTOR_STATS_MARK (now - duration, now, "Extension", "%s: %s",
+                                   G_OBJECT_TYPE_NAME (provider), extension_call_names[call]);
 }
 
 void
@@ -157,6 +215,8 @@ nautilus_inspector_stats_record_search_provider_end (NautilusSearchStats *search
     if (stats != NULL)
     {
         stats->end_time = g_get_monotonic_time ();
+        NAUTILUS_INSPECTOR_STATS_MARK (search->start_time, stats->end_time, "Search Provider",
+                                       "%s “%s”: %u hits", stats->name, search->text, stats->n_hits);
     }
 }
 
@@ -166,6 +226,7 @@ nautilus_inspector_stats_record_search_end (NautilusSearchStats *search)
     if (search->start_time != 0)
     {
         search->end_time = g_get_monotonic_time ();
+        NAUTILUS_INSPECTOR_STATS_MARK (search->start_time, search->end_time, "Search", "“%s”", search->text);
     }
 }
 

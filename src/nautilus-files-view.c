@@ -3786,6 +3786,18 @@ done_loading (NautilusFilesView *self,
         self->load_stats.end_time = g_get_monotonic_time ();
     }
 
+    if (NAUTILUS_INSPECTOR_STATS_PROFILING () && self->load_stats.start_time != 0)
+    {
+        g_autofree char *uri = nautilus_files_view_get_uri (self);
+
+        NAUTILUS_INSPECTOR_STATS_MARK (self->load_stats.start_time, self->load_stats.attributes_time,
+                                       "List Folder With Attributes", "%s", uri);
+        NAUTILUS_INSPECTOR_STATS_MARK (self->load_stats.start_time, self->load_stats.end_time,
+                                       "Load Folder", "%s, %u items%s", uri,
+                                       nautilus_files_view_get_n_items (self),
+                                       all_files_seen ? "" : ", stopped");
+    }
+
     g_clear_handle_id (&self->transition_timeout_id, g_source_remove);
     g_signal_emit (self, signals[END_LOADING], 0, all_files_seen);
     g_object_notify_by_pspec (G_OBJECT (self), properties[PROP_LOADING]);

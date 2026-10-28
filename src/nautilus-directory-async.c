@@ -2687,6 +2687,16 @@ deep_count_next_dir (DeepCountState *state)
             gint64 end_time = g_get_monotonic_time ();
 
             NAUTILUS_INSPECTOR_STATS_ADD_TIMING (deep_counts, end_time - state->start_time);
+
+            if (NAUTILUS_INSPECTOR_STATS_PROFILING ())
+            {
+                g_autofree char *uri = nautilus_file_get_uri (file);
+
+                NAUTILUS_INSPECTOR_STATS_MARK (state->start_time, end_time, "Deep Count",
+                                               "%s, %u files, %u folders", uri,
+                                               file->details->deep_file_count,
+                                               file->details->deep_directory_count);
+            }
         }
 
         file->details->deep_counts_status = NAUTILUS_REQUEST_DONE;

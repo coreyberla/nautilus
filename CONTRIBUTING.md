@@ -45,6 +45,15 @@ loading the folder or starting the search you want to look at. The "View" tab
 follows the active tab of the most recently focused window, or the view
 containing the widget picked in the "Objects" tab.
 
+When `sysprof-capture-4` is available at build time, loading folders,
+searches, thumbnails, deep counts and extension calls also show up as marks in
+the "Files" group of the [Sysprof](https://apps.gnome.org/Sysprof/) timeline,
+when Files is started from Sysprof, without opening the inspector:
+
+```bash
+sysprof-cli --use-trace-fd -- nautilus
+```
+
 ## File Chooser
 
 Developing for the nautilus file chooser may be complicated because of the
