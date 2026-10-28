@@ -243,6 +243,7 @@ typedef struct
     guint n_async_jobs;
     guint n_async_jobs_max;
     guint n_waiting_for_job;
+    guint n_deep_counting;
 } NautilusDirectoryCacheStats;
 
 void               nautilus_directory_get_cache_stats          (NautilusDirectoryCacheStats *stats);
@@ -255,6 +256,7 @@ typedef struct
     guint n_monitors;
     gboolean fully_loaded;
     gboolean watched;
+    gboolean deep_counting;
 } NautilusDirectoryDebugInfo;
 
 /* Returns an array of NautilusDirectoryDebugInfo, sorted by URI. */

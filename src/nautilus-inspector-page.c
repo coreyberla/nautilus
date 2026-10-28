@@ -35,6 +35,7 @@ enum
     RATE_FILES_CHANGED,
     RATE_FILES_REMOVED,
     RATE_FILES_MOVED,
+    RATE_DEEP_COUNT_FILES,
     N_RATES,
 };
 
@@ -90,6 +91,9 @@ struct _NautilusInspectorPage
     AdwExpanderRow *directory_list_row;
     GPtrArray *directory_rows;
     gint64 directory_list_time;
+
+    GtkLabel *deep_counting_label;
+    GtkLabel *deep_counts_label;
 
     GtkLabel *thumbnails_queued_label;
     GtkLabel *thumbnails_running_label;
@@ -384,6 +388,7 @@ update_rates (NautilusInspectorPage *self)
         [RATE_FILES_CHANGED] = stats->files_changed,
         [RATE_FILES_REMOVED] = stats->files_removed,
         [RATE_FILES_MOVED] = stats->files_moved,
+        [RATE_DEEP_COUNT_FILES] = stats->deep_count_files_scanned,
     };
     gint64 now = g_get_monotonic_time ();
 
@@ -427,10 +432,11 @@ update_directory_list (NautilusInspectorPage *self)
     {
         NautilusDirectoryDebugInfo *info = &g_array_index (infos, NautilusDirectoryDebugInfo, i);
         GtkWidget *row = adw_action_row_new ();
-        g_autofree char *subtitle = g_strdup_printf ("%u files · %u monitor requests · %u refs%s%s",
+        g_autofree char *subtitle = g_strdup_printf ("%u files · %u monitor requests · %u refs%s%s%s",
                                                      info->n_files, info->n_monitors, info->ref_count,
                                                      info->fully_loaded ? " · listed" : "",
-                                                     info->watched ? " · watched" : "");
+                                                     info->watched ? " · watched" : "",
+                                                     info->deep_counting ? " · deep counting" : "");
 
         adw_preferences_row_set_use_markup (ADW_PREFERENCES_ROW (row), FALSE);
         adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row), info->uri);
@@ -464,6 +470,8 @@ update_app_stats (NautilusInspectorPage *self)
     async_jobs = g_strdup_printf ("%u / %u", cache.n_async_jobs, cache.n_async_jobs_max);
     gtk_label_set_label (self->async_jobs_label, async_jobs);
     set_label_uint (self->waiting_for_job_label, cache.n_waiting_for_job);
+    set_label_uint (self->deep_counting_label, cache.n_deep_counting);
+    set_label_timing (self->deep_counts_label, &stats->deep_counts);
 
     directory_count = g_strdup_printf ("%u directories", cache.n_directories);
     adw_expander_row_set_subtitle (self->directory_list_row, directory_count);
@@ -576,6 +584,13 @@ build_app_page (NautilusInspectorPage *self,
     self->directory_list_row = ADW_EXPANDER_ROW (adw_expander_row_new ());
     adw_preferences_row_set_title (ADW_PREFERENCES_ROW (self->directory_list_row), "All Directories");
     adw_preferences_group_add (group, GTK_WIDGET (self->directory_list_row));
+
+    group = add_group (page, "Deep Counts",
+                       "Recursive item counts and sizes of folders, as in the Properties dialog. "
+                       "A long running count scanning many files keeps the disk busy.");
+    self->deep_counting_label = add_row (group, "Running");
+    self->rate_labels[RATE_DEEP_COUNT_FILES] = add_row (group, "Files Scanned");
+    self->deep_counts_label = add_row (group, "Completed");
 
     group = add_group (page, "Thumbnailer",
                        "Shared by all views, which share its results. Totals are while the inspector is shown.");

@@ -1713,6 +1713,7 @@ nautilus_directory_get_cache_stats (NautilusDirectoryCacheStats *stats)
         stats->n_files += g_hash_table_size (details->file_hash);
         stats->n_watched += details->monitor != NULL ? 1 : 0;
         stats->n_monitors += count_monitors (directory);
+        stats->n_deep_counting += details->deep_count_in_progress != NULL ? 1 : 0;
         stats->n_files_queued += nautilus_hash_queue_get_length (details->high_priority_queue) +
                                  nautilus_hash_queue_get_length (details->low_priority_queue) +
                                  nautilus_hash_queue_get_length (details->extension_queue);
@@ -1760,6 +1761,7 @@ nautilus_directory_get_debug_infos (void)
             .n_monitors = count_monitors (directory),
             .fully_loaded = details->directory_loaded,
             .watched = details->monitor != NULL,
+            .deep_counting = details->deep_count_in_progress != NULL,
         };
 
         g_array_append_val (infos, info);

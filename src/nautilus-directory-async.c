@@ -16,6 +16,7 @@
 #include "nautilus-file-utilities.h"
 #include "nautilus-global-preferences.h"
 #include "nautilus-hash-queue.h"
+#include "nautilus-inspector-stats.h"
 #include "nautilus-monitor.h"
 #include "nautilus-signaller.h"
 #include "nautilus-thumbnails.h"
@@ -92,6 +93,7 @@ struct DirectoryCountState
 struct DeepCountState
 {
     NautilusDirectory *directory;
+    gint64 start_time; /* Only set while the inspector is shown. */
     GCancellable *cancellable;
     GFileEnumerator *enumerator;
     GFile *deep_count_location;
@@ -2621,6 +2623,8 @@ deep_count_one (DeepCountState *state,
         file->details->deep_file_count += 1;
     }
 
+    NAUTILUS_INSPECTOR_STATS_ADD (deep_count_files_scanned, 1);
+
     /* Count the size. */
     if (!is_seen_inode && g_file_info_has_attribute (info, G_FILE_ATTRIBUTE_STANDARD_SIZE))
     {
@@ -2678,6 +2682,13 @@ deep_count_next_dir (DeepCountState *state)
     }
     else
     {
+        if (state->start_time != 0)
+        {
+            gint64 end_time = g_get_monotonic_time ();
+
+            NAUTILUS_INSPECTOR_STATS_ADD_TIMING (deep_counts, end_time - state->start_time);
+        }
+
         file->details->deep_counts_status = NAUTILUS_REQUEST_DONE;
         directory->details->deep_count_file = NULL;
         directory->details->deep_count_in_progress = NULL;
@@ -2905,6 +2916,7 @@ deep_count_start (NautilusDirectory *directory,
 
     state = g_new0 (DeepCountState, 1);
     state->directory = directory;
+    state->start_time = NAUTILUS_INSPECTOR_STATS_ENABLED () ? g_get_monotonic_time () : 0;
     state->cancellable = g_cancellable_new ();
     state->seen_deep_count_inodes = g_hash_table_new (g_int64_hash, g_int64_equal);
     state->fs_id = NULL;

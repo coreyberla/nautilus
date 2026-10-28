@@ -39,6 +39,9 @@ typedef struct
     NautilusTimingStats thumbnail_generation;
     NautilusTimingStats thumbnail_wait;
     guint64 thumbnails_failed;
+
+    guint64 deep_count_files_scanned;
+    NautilusTimingStats deep_counts;
 } NautilusInspectorStats;
 
 #ifdef ENABLE_INSPECTOR_PAGE
