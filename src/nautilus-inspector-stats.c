@@ -15,3 +15,12 @@ nautilus_inspector_stats_set_shown (gboolean shown)
 {
     nautilus_inspector_stats_enabled = shown;
 }
+
+void
+nautilus_inspector_stats_add_timing (NautilusTimingStats *timing,
+                                     gint64               duration)
+{
+    timing->n_calls += 1;
+    timing->total_time += duration;
+    timing->max_time = MAX (timing->max_time, duration);
+}

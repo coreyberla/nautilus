@@ -24,6 +24,10 @@ tests = {
   'test-ui-utilities': {},
 }
 
+if get_option('inspector-page')
+  tests += {'test-inspector-stats': {}}
+endif
+
 foreach test_name, extra_args : tests
   source = test_name + '.c'
   suite = ['displayless'] + extra_args.get('suite', [])

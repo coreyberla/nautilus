@@ -12,6 +12,7 @@
 
 #include "nautilus-global-preferences.h"
 #include "nautilus-hash-queue.h"
+#include "nautilus-inspector-stats.h"
 #include "nautilus-mime-actions.h"
 #include "nautilus-thumbnails.h"
 #include "nautilus-ui-utilities.h"
@@ -32,6 +33,10 @@ struct _NautilusImage
     gboolean is_loading_attributes;
     GCancellable *cancellable;
     GError *error;
+
+    NautilusImageSource thumbnail_source;
+    gint64 load_start_time; /* Only set while the inspector is shown. */
+    gint64 load_duration;
 };
 
 enum
@@ -342,6 +347,7 @@ file_info_ready_callback (GObject      *source_object,
     if (cache_item != NULL &&
         cache_item->mtime == self->source_mtime)
     {
+        self->thumbnail_source = NAUTILUS_IMAGE_SOURCE_MEMORY_CACHE;
         nautilus_image_set_texture (self, cache_item->texture);
 
         return;
@@ -356,6 +362,8 @@ file_info_ready_callback (GObject      *source_object,
         if (thumb_path != NULL)
         {
             g_autoptr (GFile) thumb_file = g_file_new_for_path (thumb_path);
+
+            self->thumbnail_source = NAUTILUS_IMAGE_SOURCE_DISK_CACHE;
 
             g_file_read_async (thumb_file,
                                G_PRIORITY_DEFAULT,
@@ -379,6 +387,7 @@ file_info_ready_callback (GObject      *source_object,
                      G_IO_ERROR_FAILED,
                      "Image file is too large: %" G_GUINT64_FORMAT " bytes (max: %" G_GUINT64_FORMAT " bytes)",
                      file_size, cached_thumbnail_size_limit);
+        self->thumbnail_source = NAUTILUS_IMAGE_SOURCE_TOO_LARGE;
         handle_loading_error (self);
 
         return;
@@ -408,17 +417,28 @@ file_info_ready_callback (GObject      *source_object,
                      G_IO_ERROR_NOT_SUPPORTED,
                      "MIME type not supported for thumbnails: %s",
                      self->source_content_type ? self->source_content_type : "(unknown)");
+        self->thumbnail_source = NAUTILUS_IMAGE_SOURCE_UNSUPPORTED;
         handle_loading_error (self);
 
         return;
     }
 
+    self->thumbnail_source = NAUTILUS_IMAGE_SOURCE_THUMBNAILER;
     nautilus_create_thumbnail_async (uri,
                                      self->source_content_type,
                                      self->source_mtime,
                                      self->cancellable,
                                      thumbnailing_done_cb,
                                      self);
+}
+
+void
+nautilus_image_get_debug_info (NautilusImage       *self,
+                               NautilusImageSource *source,
+                               gint64              *load_duration)
+{
+    *source = self->thumbnail_source;
+    *load_duration = self->load_duration;
 }
 
 NautilusImageStatus
@@ -455,6 +475,11 @@ nautilus_image_set_texture (NautilusImage *self,
     {
         resize = (gdk_texture_get_width (self->texture) != gdk_texture_get_width (texture)) ||
                  (gdk_texture_get_height (self->texture) != gdk_texture_get_height (texture));
+    }
+
+    if (texture != NULL && self->load_start_time != 0 && self->load_duration == 0)
+    {
+        self->load_duration = g_get_monotonic_time () - self->load_start_time;
     }
 
     if (g_set_object (&self->texture, texture))
@@ -567,6 +592,10 @@ nautilus_image_set_source (NautilusImage *self,
 
     g_set_object (&self->source, source);
     nautilus_image_set_texture (self, NULL);
+    self->thumbnail_source = NAUTILUS_IMAGE_SOURCE_NONE;
+    self->load_duration = 0;
+    self->load_start_time = source != NULL && NAUTILUS_INSPECTOR_STATS_ENABLED () ?
+                            g_get_monotonic_time () : 0;
     g_clear_pointer (&self->source_content_type, g_free);
     self->source_mtime = 0;
     g_clear_error (&self->error);

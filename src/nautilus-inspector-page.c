@@ -15,6 +15,7 @@
 #include "nautilus-inspector-page.h"
 
 #include "nautilus-files-view.h"
+#include "nautilus-image.h"
 #include "nautilus-inspector-stats.h"
 #include "nautilus-window.h"
 #include "nautilus-window-slot.h"
@@ -22,6 +23,13 @@
 #include <gtk/gtk.h>
 
 #define REFRESH_INTERVAL_MS 250
+
+typedef struct
+{
+    guint statuses[NAUTILUS_IMAGE_STATUS_FALLBACK + 1];
+    guint sources[NAUTILUS_IMAGE_N_SOURCES];
+    NautilusTimingStats load_times;
+} OnScreenIcons;
 
 struct _NautilusInspectorPage
 {
@@ -45,6 +53,10 @@ struct _NautilusInspectorPage
     GtkLabel *batches_label;
     GtkLabel *sort_label;
     GtkLabel *splice_label;
+
+    GtkLabel *status_labels[NAUTILUS_IMAGE_STATUS_FALLBACK + 1];
+    GtkLabel *source_labels[NAUTILUS_IMAGE_N_SOURCES];
+    GtkLabel *time_to_thumbnail_label;
 };
 
 enum
@@ -151,6 +163,25 @@ set_label_ms (GtkLabel *label,
     gtk_label_set_label (label, text);
 }
 
+static void
+set_label_timing (GtkLabel                  *label,
+                  const NautilusTimingStats *timing)
+{
+    if (timing == NULL || timing->n_calls == 0)
+    {
+        gtk_label_set_label (label, "—");
+    }
+    else
+    {
+        g_autofree char *text = g_strdup_printf ("%u × avg %.1f ms · max %.1f ms",
+                                                 timing->n_calls,
+                                                 timing->total_time / 1000.0 / timing->n_calls,
+                                                 timing->max_time / 1000.0);
+
+        gtk_label_set_label (label, text);
+    }
+}
+
 static NautilusFilesView *
 get_picked_view (NautilusInspectorPage *self)
 {
@@ -183,6 +214,39 @@ get_active_tab_view (void)
     }
 
     return NULL;
+}
+
+static void
+count_on_screen_icons (GtkWidget     *widget,
+                       OnScreenIcons *icons)
+{
+    if (!gtk_widget_get_mapped (widget))
+    {
+        return;
+    }
+
+    if (NAUTILUS_IS_IMAGE (widget))
+    {
+        NautilusImageSource source;
+        gint64 load_duration;
+
+        nautilus_image_get_debug_info (NAUTILUS_IMAGE (widget), &source, &load_duration);
+        icons->statuses[nautilus_image_get_status (NAUTILUS_IMAGE (widget))] += 1;
+        icons->sources[source] += 1;
+        if (load_duration != 0)
+        {
+            nautilus_inspector_stats_add_timing (&icons->load_times, load_duration);
+        }
+
+        return;
+    }
+
+    for (GtkWidget *child = gtk_widget_get_first_child (widget);
+         child != NULL;
+         child = gtk_widget_get_next_sibling (child))
+    {
+        count_on_screen_icons (child, icons);
+    }
 }
 
 static void
@@ -228,6 +292,19 @@ update_view_stats (NautilusInspectorPage *self,
         gtk_label_set_label (self->sort_label, "—");
         gtk_label_set_label (self->splice_label, "—");
     }
+
+    OnScreenIcons icons = { 0 };
+
+    count_on_screen_icons (GTK_WIDGET (view), &icons);
+    for (guint i = 0; i < G_N_ELEMENTS (self->status_labels); i++)
+    {
+        set_label_uint (self->status_labels[i], icons.statuses[i]);
+    }
+    for (guint i = 0; i < G_N_ELEMENTS (self->source_labels); i++)
+    {
+        set_label_uint (self->source_labels[i], icons.sources[i]);
+    }
+    set_label_timing (self->time_to_thumbnail_label, &icons.load_times);
 }
 
 static void
@@ -238,12 +315,21 @@ clear_view_stats (NautilusInspectorPage *self)
         self->location_label, self->state_label, self->items_label, self->loads_label,
         self->attributes_label, self->first_items_label, self->total_time_label,
         self->batches_label, self->sort_label, self->splice_label,
+        self->time_to_thumbnail_label,
     };
 
     adw_preferences_group_set_description (self->view_group, "No view found");
     for (guint i = 0; i < G_N_ELEMENTS (labels); i++)
     {
         gtk_label_set_label (labels[i], "—");
+    }
+    for (guint i = 0; i < G_N_ELEMENTS (self->status_labels); i++)
+    {
+        gtk_label_set_label (self->status_labels[i], "—");
+    }
+    for (guint i = 0; i < G_N_ELEMENTS (self->source_labels); i++)
+    {
+        gtk_label_set_label (self->source_labels[i], "—");
     }
 }
 
@@ -288,6 +374,23 @@ build_view_page (NautilusInspectorPage *self,
     self->sort_label = add_row (group, "Sorting Batches");
     self->splice_label = add_row (group, "Splicing Into Model");
     set_row_subtitle (self->splice_label, "Includes re-sorting the view and updating the widgets");
+
+    group = add_group (page, "Icons on Screen", "Visible icons in this view, by state");
+    self->status_labels[NAUTILUS_IMAGE_STATUS_THUMBNAIL] = add_row (group, "Thumbnail Shown");
+    self->status_labels[NAUTILUS_IMAGE_STATUS_LOADING_ATTRIBUTES] = add_row (group, "Querying File Info");
+    self->status_labels[NAUTILUS_IMAGE_STATUS_LOADING_THUMBNAIL] = add_row (group, "Loading Thumbnail");
+    self->status_labels[NAUTILUS_IMAGE_STATUS_FALLBACK] = add_row (group, "Icon (No Thumbnail)");
+
+    group = add_group (page, "Thumbnails on Screen", "Where the thumbnails of visible icons came from");
+    self->source_labels[NAUTILUS_IMAGE_SOURCE_MEMORY_CACHE] = add_row (group, "Memory Cache");
+    self->source_labels[NAUTILUS_IMAGE_SOURCE_DISK_CACHE] = add_row (group, "Disk Cache");
+    self->source_labels[NAUTILUS_IMAGE_SOURCE_THUMBNAILER] = add_row (group, "Thumbnailer");
+    set_row_subtitle (self->source_labels[NAUTILUS_IMAGE_SOURCE_THUMBNAILER], "Generated now, or failed");
+    self->source_labels[NAUTILUS_IMAGE_SOURCE_TOO_LARGE] = add_row (group, "Skipped, Too Large");
+    self->source_labels[NAUTILUS_IMAGE_SOURCE_UNSUPPORTED] = add_row (group, "Skipped, Unsupported Type");
+    self->source_labels[NAUTILUS_IMAGE_SOURCE_NONE] = add_row (group, "Not Decided Yet");
+    self->time_to_thumbnail_label = add_row (group, "Time to Thumbnail");
+    set_row_subtitle (self->time_to_thumbnail_label, "Until shown, timed while the inspector is shown");
 }
 
 static void
