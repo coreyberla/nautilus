@@ -37,3 +37,6 @@ gboolean   nautilus_thumbnail_is_mimetype_limited_by_size
 						    (const char *mime_type);
 char *     nautilus_thumbnail_get_path_for_uri      (const char *uri);
 
+/* For debugging. */
+void       nautilus_thumbnail_get_queue_state       (guint *n_queued,
+                                                     guint *n_running);

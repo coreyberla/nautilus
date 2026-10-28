@@ -14,6 +14,7 @@
 #define GNOME_DESKTOP_USE_UNSTABLE_API
 
 #include "nautilus-hash-queue.h"
+#include "nautilus-inspector-stats.h"
 
 #include <glycin.h>
 #include <glycin-gtk4.h>
@@ -52,6 +53,10 @@ typedef struct
     GPtrArray *callbacks;
 
     GError *error;
+
+    /* Only set while the inspector is shown. */
+    gint64 enqueue_time;
+    gint64 start_time;
 } NautilusThumbnailInfo;
 
 typedef struct
@@ -572,6 +577,7 @@ thumbnail_enqueue (NautilusThumbnailInfo     *info,
                  info->image_uri);
 
         g_ptr_array_add (info->callbacks, cb_data);
+        info->enqueue_time = NAUTILUS_INSPECTOR_STATS_ENABLED () ? g_get_monotonic_time () : 0;
         nautilus_hash_queue_enqueue (thumbnails_to_make, info->image_uri, info);
 
         /* If we didn't schedule the thumbnail function to start on idle, do
@@ -714,6 +720,13 @@ thumbnail_generated_cb (GObject      *source_object,
                                                                         result,
                                                                         &error);
 
+    if (info->start_time != 0)
+    {
+        gint64 end_time = g_get_monotonic_time ();
+
+        NAUTILUS_INSPECTOR_STATS_ADD_TIMING (thumbnail_generation, end_time - info->start_time);
+    }
+
     if (pixbuf != NULL)
     {
         g_autofree gchar *mtime = g_strdup_printf ("%" G_GINT64_FORMAT,
@@ -728,6 +741,7 @@ thumbnail_generated_cb (GObject      *source_object,
         gdk_pixbuf_set_option (pixbuf, "tEXt::Thumb::MTime", mtime);
         g_clear_object (&info->pixbuf);
         info->pixbuf = pixbuf;
+        NAUTILUS_INSPECTOR_STATS_ADD (thumbnails_generated, 1);
 
         gnome_desktop_thumbnail_factory_save_thumbnail_async (thumbnail_factory,
                                                               pixbuf,
@@ -740,6 +754,7 @@ thumbnail_generated_cb (GObject      *source_object,
     else
     {
         info->error = g_error_copy (error);
+        NAUTILUS_INSPECTOR_STATS_ADD (thumbnails_failed, 1);
         g_debug ("(Thumbnail Async Thread) Thumbnail failed: %s (%s)",
                  info->image_uri, error->message);
 
@@ -821,6 +836,12 @@ thumbnail_starter_cb (gpointer data)
         running_threads += 1;
         g_hash_table_insert (currently_thumbnailing_hash, info->image_uri, info);
 
+        if (info->enqueue_time != 0)
+        {
+            info->start_time = g_get_monotonic_time ();
+            NAUTILUS_INSPECTOR_STATS_ADD_TIMING (thumbnail_wait, info->start_time - info->enqueue_time);
+        }
+
         gnome_desktop_thumbnail_factory_generate_thumbnail_async (thumbnail_factory,
                                                                   info->image_uri,
                                                                   info->mime_type,
@@ -838,4 +859,12 @@ thumbnail_starter_cb (gpointer data)
     }
 
     return G_SOURCE_REMOVE;
+}
+
+void
+nautilus_thumbnail_get_queue_state (guint *n_queued,
+                                    guint *n_running)
+{
+    *n_queued = thumbnails_to_make != NULL ? nautilus_hash_queue_get_length (thumbnails_to_make) : 0;
+    *n_running = running_threads;
 }

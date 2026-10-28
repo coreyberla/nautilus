@@ -17,6 +17,7 @@
 #include "nautilus-files-view.h"
 #include "nautilus-image.h"
 #include "nautilus-inspector-stats.h"
+#include "nautilus-thumbnails.h"
 #include "nautilus-window.h"
 #include "nautilus-window-slot.h"
 
@@ -57,6 +58,16 @@ struct _NautilusInspectorPage
     GtkLabel *status_labels[NAUTILUS_IMAGE_STATUS_FALLBACK + 1];
     GtkLabel *source_labels[NAUTILUS_IMAGE_N_SOURCES];
     GtkLabel *time_to_thumbnail_label;
+
+    /* App-wide */
+
+    GtkLabel *thumbnails_queued_label;
+    GtkLabel *thumbnails_running_label;
+    GtkLabel *thumbnail_wait_label;
+    GtkLabel *thumbnail_generation_label;
+    GtkLabel *thumbnails_generated_label;
+    GtkLabel *thumbnails_failed_label;
+    GtkLabel *thumbnail_cache_label;
 };
 
 enum
@@ -333,6 +344,26 @@ clear_view_stats (NautilusInspectorPage *self)
     }
 }
 
+static void
+update_app_stats (NautilusInspectorPage *self)
+{
+    const NautilusInspectorStats *stats = &nautilus_inspector_stats;
+    g_autofree char *cache_size = NULL;
+    guint n_queued, n_running, n_cached, max_cached;
+
+    nautilus_thumbnail_get_queue_state (&n_queued, &n_running);
+    set_label_uint (self->thumbnails_queued_label, n_queued);
+    set_label_uint (self->thumbnails_running_label, n_running);
+    set_label_timing (self->thumbnail_wait_label, &stats->thumbnail_wait);
+    set_label_timing (self->thumbnail_generation_label, &stats->thumbnail_generation);
+    set_label_uint (self->thumbnails_generated_label, stats->thumbnails_generated);
+    set_label_uint (self->thumbnails_failed_label, stats->thumbnails_failed);
+
+    nautilus_image_get_thumbnail_cache_size (&n_cached, &max_cached);
+    cache_size = g_strdup_printf ("%u / %u", n_cached, max_cached);
+    gtk_label_set_label (self->thumbnail_cache_label, cache_size);
+}
+
 static gboolean
 refresh (gpointer user_data)
 {
@@ -348,6 +379,8 @@ refresh (gpointer user_data)
     {
         clear_view_stats (self);
     }
+
+    update_app_stats (self);
 
     return G_SOURCE_CONTINUE;
 }
@@ -391,6 +424,23 @@ build_view_page (NautilusInspectorPage *self,
     self->source_labels[NAUTILUS_IMAGE_SOURCE_NONE] = add_row (group, "Not Decided Yet");
     self->time_to_thumbnail_label = add_row (group, "Time to Thumbnail");
     set_row_subtitle (self->time_to_thumbnail_label, "Until shown, timed while the inspector is shown");
+}
+
+static void
+build_app_page (NautilusInspectorPage *self,
+                AdwPreferencesPage    *page)
+{
+    AdwPreferencesGroup *group;
+
+    group = add_group (page, "Thumbnailer",
+                       "Shared by all views, which share its results. Totals are while the inspector is shown.");
+    self->thumbnails_queued_label = add_row (group, "Queued");
+    self->thumbnails_running_label = add_row (group, "Generating Now");
+    self->thumbnail_wait_label = add_row (group, "Wait in Queue");
+    self->thumbnail_generation_label = add_row (group, "Generation");
+    self->thumbnails_generated_label = add_row (group, "Generated");
+    self->thumbnails_failed_label = add_row (group, "Failed");
+    self->thumbnail_cache_label = add_row (group, "Memory Cache");
 }
 
 static void
@@ -519,6 +569,7 @@ nautilus_inspector_page_init (NautilusInspectorPage *self)
     GtkWidget *switcher = adw_view_switcher_new ();
 
     build_view_page (self, add_page (stack, "view", "View", "folder-symbolic"));
+    build_app_page (self, add_page (stack, "app", "App-wide", "view-grid-symbolic"));
 
     adw_view_switcher_set_stack (ADW_VIEW_SWITCHER (switcher), stack);
     adw_view_switcher_set_policy (ADW_VIEW_SWITCHER (switcher), ADW_VIEW_SWITCHER_POLICY_WIDE);

@@ -441,6 +441,14 @@ nautilus_image_get_debug_info (NautilusImage       *self,
     *load_duration = self->load_duration;
 }
 
+void
+nautilus_image_get_thumbnail_cache_size (guint *n_items,
+                                         guint *max_items)
+{
+    *n_items = thumbnail_cache != NULL ? nautilus_hash_queue_get_length (thumbnail_cache) : 0;
+    *max_items = CACHE_COUNT_LIMIT;
+}
+
 NautilusImageStatus
 nautilus_image_get_status (NautilusImage *self)
 {

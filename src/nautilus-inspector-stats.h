@@ -26,11 +26,33 @@ typedef struct
     gint64 max_time;
 } NautilusTimingStats;
 
+typedef struct
+{
+    /* The thumbnailer is shared by all views, which share its results. */
+    guint64 thumbnails_generated;
+    NautilusTimingStats thumbnail_generation;
+    NautilusTimingStats thumbnail_wait;
+    guint64 thumbnails_failed;
+} NautilusInspectorStats;
+
 #ifdef ENABLE_INSPECTOR_PAGE
 
 extern gboolean nautilus_inspector_stats_enabled;
+extern NautilusInspectorStats nautilus_inspector_stats;
 
 #define NAUTILUS_INSPECTOR_STATS_ENABLED() G_UNLIKELY (nautilus_inspector_stats_enabled)
+
+#define NAUTILUS_INSPECTOR_STATS_ADD(field, n) \
+        G_STMT_START { \
+            if (NAUTILUS_INSPECTOR_STATS_ENABLED ()) \
+            { \
+                nautilus_inspector_stats.field += (n); \
+            } \
+        } G_STMT_END
+
+/* Only call with a duration measured while the inspector was shown. */
+#define NAUTILUS_INSPECTOR_STATS_ADD_TIMING(field, duration) \
+        nautilus_inspector_stats_add_timing (&nautilus_inspector_stats.field, (duration))
 
 void nautilus_inspector_stats_set_shown (gboolean shown);
 
@@ -40,6 +62,9 @@ void nautilus_inspector_stats_add_timing (NautilusTimingStats *timing,
 #else
 
 #define NAUTILUS_INSPECTOR_STATS_ENABLED() FALSE
+/* The arguments are still type-checked, but never evaluated. */
+#define NAUTILUS_INSPECTOR_STATS_ADD(field, n) G_STMT_START { if (0) { (void) (n); } } G_STMT_END
+#define NAUTILUS_INSPECTOR_STATS_ADD_TIMING(field, duration) G_STMT_START { if (0) { (void) (duration); } } G_STMT_END
 
 #endif
 

@@ -9,6 +9,7 @@
 #include "nautilus-inspector-stats.h"
 
 gboolean nautilus_inspector_stats_enabled = FALSE;
+NautilusInspectorStats nautilus_inspector_stats = { 0 };
 
 void
 nautilus_inspector_stats_set_shown (gboolean shown)

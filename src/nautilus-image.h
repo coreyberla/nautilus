@@ -61,6 +61,11 @@ nautilus_image_set_fallback                             (NautilusImage *self,
 NautilusImageStatus
 nautilus_image_get_status                               (NautilusImage *self);
 
+/* For debugging: the in-memory cache of thumbnails shared by all images. */
+void
+nautilus_image_get_thumbnail_cache_size                 (guint *n_items,
+                                                         guint *max_items);
+
 /* For debugging: load_duration is the time until the thumbnail was shown, in
  * µs, or 0 if not shown yet or not timed. See nautilus-inspector-stats.h. */
 void
