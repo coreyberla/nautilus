@@ -16,6 +16,7 @@
 #include "nautilus-file-private.h"
 #include "nautilus-global-preferences.h"
 #include "nautilus-hash-queue.h"
+#include "nautilus-inspector-stats.h"
 #include "nautilus-monitor.h"
 #include "nautilus-scheme.h"
 #include "nautilus-vfs-directory.h"
@@ -998,6 +999,8 @@ file_list_free_full (GList *list)
 void
 nautilus_directory_notify_files_added (GList *files)
 {
+    NAUTILUS_INSPECTOR_STATS_ADD (files_added, g_list_length (files));
+
     /* Make a list of added files in each directory. */
     g_autoptr (GHashTable) added_lists =
         g_hash_table_new_full (NULL, NULL, NULL, (GDestroyNotify) file_list_free_full);
@@ -1072,6 +1075,8 @@ nautilus_directory_notify_files_added (GList *files)
 void
 nautilus_directory_notify_files_changed (GList *files)
 {
+    NAUTILUS_INSPECTOR_STATS_ADD (files_changed, g_list_length (files));
+
     /* Make a list of changed files in each directory. */
     g_autoptr (GHashTable) changed_lists =
         g_hash_table_new_full (NULL, NULL, NULL, (GDestroyNotify) nautilus_file_list_free);
@@ -1132,6 +1137,8 @@ nautilus_directory_mark_files_unmounted (GList *files)
 void
 nautilus_directory_notify_files_removed (GList *files)
 {
+    NAUTILUS_INSPECTOR_STATS_ADD (files_removed, g_list_length (files));
+
     /* Make a list of changed files in each directory. */
     g_autoptr (GHashTable) changed_lists =
         g_hash_table_new_full (NULL, NULL, NULL, (GDestroyNotify) nautilus_file_list_free);
@@ -1312,6 +1319,8 @@ nautilus_directory_moved (const char *old_uri,
 void
 nautilus_directory_notify_files_moved (GList *file_pairs)
 {
+    NAUTILUS_INSPECTOR_STATS_ADD (files_moved, g_list_length (file_pairs));
+
     /* Make a list of added and changed files in each directory. */
     g_autoptr (GFileList) new_files_list = NULL;
     g_autoptr (GHashTable) added_lists =

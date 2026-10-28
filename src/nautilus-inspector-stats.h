@@ -28,6 +28,12 @@ typedef struct
 
 typedef struct
 {
+    /* nautilus_directory_notify_files_*() */
+    guint64 files_added;
+    guint64 files_changed;
+    guint64 files_removed;
+    guint64 files_moved;
+
     /* The thumbnailer is shared by all views, which share its results. */
     guint64 thumbnails_generated;
     NautilusTimingStats thumbnail_generation;

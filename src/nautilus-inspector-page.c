@@ -23,9 +23,20 @@
 #include "nautilus-window-slot.h"
 
 #include <gtk/gtk.h>
+#include <string.h>
 
 #define REFRESH_INTERVAL_MS 250
+#define RATE_INTERVAL_US G_USEC_PER_SEC
 #define DIRECTORY_LIST_INTERVAL_US G_USEC_PER_SEC
+
+enum
+{
+    RATE_FILES_ADDED,
+    RATE_FILES_CHANGED,
+    RATE_FILES_REMOVED,
+    RATE_FILES_MOVED,
+    N_RATES,
+};
 
 typedef struct
 {
@@ -62,6 +73,11 @@ struct _NautilusInspectorPage
     GtkLabel *time_to_thumbnail_label;
 
     /* App-wide */
+
+    GtkLabel *rate_labels[N_RATES];
+    guint64 rate_previous_counts[N_RATES];
+    double rates[N_RATES];
+    gint64 rate_time;
 
     GtkLabel *directories_label;
     GtkLabel *fully_loaded_label;
@@ -359,6 +375,44 @@ clear_view_stats (NautilusInspectorPage *self)
 }
 
 static void
+update_rates (NautilusInspectorPage *self)
+{
+    const NautilusInspectorStats *stats = &nautilus_inspector_stats;
+    guint64 counts[N_RATES] =
+    {
+        [RATE_FILES_ADDED] = stats->files_added,
+        [RATE_FILES_CHANGED] = stats->files_changed,
+        [RATE_FILES_REMOVED] = stats->files_removed,
+        [RATE_FILES_MOVED] = stats->files_moved,
+    };
+    gint64 now = g_get_monotonic_time ();
+
+    if (self->rate_time == 0)
+    {
+        memcpy (self->rate_previous_counts, counts, sizeof (counts));
+        self->rate_time = now;
+    }
+    else if (now - self->rate_time >= RATE_INTERVAL_US)
+    {
+        for (guint i = 0; i < N_RATES; i++)
+        {
+            self->rates[i] = (counts[i] - self->rate_previous_counts[i]) * (double) G_USEC_PER_SEC /
+                             (now - self->rate_time);
+        }
+        memcpy (self->rate_previous_counts, counts, sizeof (counts));
+        self->rate_time = now;
+    }
+
+    for (guint i = 0; i < N_RATES; i++)
+    {
+        g_autofree char *text = g_strdup_printf ("%.0f/s · %" G_GUINT64_FORMAT " total",
+                                                 self->rates[i], counts[i]);
+
+        gtk_label_set_label (self->rate_labels[i], text);
+    }
+}
+
+static void
 update_directory_list (NautilusInspectorPage *self)
 {
     g_autoptr (GArray) infos = nautilus_directory_get_debug_infos ();
@@ -397,6 +451,8 @@ update_app_stats (NautilusInspectorPage *self)
     g_autofree char *cache_size = NULL;
     guint n_queued, n_running, n_cached, max_cached;
     gint64 now = g_get_monotonic_time ();
+
+    update_rates (self);
 
     nautilus_directory_get_cache_stats (&cache);
     set_label_uint (self->directories_label, cache.n_directories);
@@ -498,6 +554,13 @@ build_app_page (NautilusInspectorPage *self,
                 AdwPreferencesPage    *page)
 {
     AdwPreferencesGroup *group;
+
+    group = add_group (page, "File Changes",
+                       "Files reported as changed on disk or by Files itself, while the inspector is shown");
+    self->rate_labels[RATE_FILES_ADDED] = add_row (group, "Added");
+    self->rate_labels[RATE_FILES_CHANGED] = add_row (group, "Changed");
+    self->rate_labels[RATE_FILES_REMOVED] = add_row (group, "Removed");
+    self->rate_labels[RATE_FILES_MOVED] = add_row (group, "Moved");
 
     group = add_group (page, "Directories", "All directories in memory, shared by all windows");
     self->directories_label = add_row (group, "Directories");
