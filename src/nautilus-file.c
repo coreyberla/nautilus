@@ -171,6 +171,12 @@ enum
 
 static GParamSpec *properties[N_PROPS] = { NULL, };
 
+static const char *
+peek_mime_type (NautilusFile *file)
+{
+    return file->details->mime_type;
+}
+
 static void
 nautilus_file_init (NautilusFile *file)
 {
@@ -3358,10 +3364,10 @@ compare_by_type (NautilusFile *file_1,
         return +1;
     }
 
-    if (file_1->details->mime_type != NULL &&
-        file_2->details->mime_type != NULL &&
-        strcmp (file_1->details->mime_type,
-                file_2->details->mime_type) == 0)
+    if (peek_mime_type (file_1) != NULL &&
+        peek_mime_type (file_2) != NULL &&
+        strcmp (peek_mime_type (file_1),
+                peek_mime_type (file_2)) == 0)
     {
         return 0;
     }
@@ -3388,7 +3394,7 @@ compare_by_type (NautilusFile *file_1,
     if (result == 0)
     {
         /* Among files of the same (generic) type, sort them by mime type. */
-        result = g_utf8_collate (file_1->details->mime_type, file_2->details->mime_type);
+        result = g_utf8_collate (peek_mime_type (file_1), peek_mime_type (file_2));
     }
 
     return result;
@@ -4446,7 +4452,7 @@ nautilus_file_should_show_thumbnail (NautilusFile *file)
         return FALSE;
     }
 
-    const char *mime_type = file->details->mime_type;
+    const char *mime_type = peek_mime_type (file);
 
     if (mime_type == NULL)
     {
@@ -4653,7 +4659,7 @@ nautilus_file_get_thumbnail_icon (NautilusFile          *file,
                                 width, height);
 
         if (size >= NAUTILUS_GRID_ICON_SIZE_SMALL &&
-            nautilus_mime_is_video (file->details->mime_type))
+            nautilus_mime_is_video (peek_mime_type (file)))
         {
             nautilus_ui_frame_video (snapshot, width, height);
         }
@@ -6724,7 +6730,7 @@ get_common_description (NautilusFile *file)
 
     g_assert (NAUTILUS_IS_FILE (file));
 
-    mime_type = file->details->mime_type;
+    mime_type = peek_mime_type (file);
     if (mime_type == NULL)
     {
         return NULL;
@@ -6758,7 +6764,7 @@ get_description (NautilusFile *file)
     }
     else
     {
-        const char *mime_type = file->details->mime_type;
+        const char *mime_type = peek_mime_type (file);
 
         return get_basic_type_for_mime_type (mime_type);
     }
@@ -6768,7 +6774,7 @@ static char *
 get_detailed_description (NautilusFile *file)
 {
     char *description;
-    const char *mime_type = file->details->mime_type;
+    const char *mime_type = peek_mime_type (file);
     const char *common_description = get_common_description (file);
 
     if (common_description != NULL)
@@ -6866,10 +6872,10 @@ nautilus_file_is_launchable (NautilusFile *file)
     gboolean type_can_be_executable;
 
     type_can_be_executable = FALSE;
-    if (file->details->mime_type != NULL)
+    if (peek_mime_type (file) != NULL)
     {
         type_can_be_executable =
-            g_content_type_can_be_executable (file->details->mime_type);
+            g_content_type_can_be_executable (peek_mime_type (file));
     }
 
     return type_can_be_executable &&
@@ -8597,9 +8603,9 @@ nautilus_file_get_mime_type (NautilusFile *file)
 {
     g_return_val_if_fail (NAUTILUS_IS_FILE (file), NULL);
 
-    return file->details->mime_type != NULL ?
-           file->details->mime_type :
-           "application/octet-stream";
+    const char *mime_type = peek_mime_type (file);
+
+    return mime_type != NULL ? mime_type : "application/octet-stream";
 }
 
 static gboolean
@@ -8628,12 +8634,12 @@ nautilus_file_is_mime_type (NautilusFile *file,
     g_return_val_if_fail (NAUTILUS_IS_FILE (file), FALSE);
     g_return_val_if_fail (mime_type != NULL, FALSE);
 
-    if (file->details->mime_type == NULL)
+    if (peek_mime_type (file) == NULL)
     {
         return FALSE;
     }
 
-    return g_content_type_is_a (file->details->mime_type, mime_type);
+    return g_content_type_is_a (peek_mime_type (file), mime_type);
 }
 
 static gboolean
