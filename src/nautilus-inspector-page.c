@@ -36,6 +36,15 @@ struct _NautilusInspectorPage
     GtkLabel *location_label;
     GtkLabel *state_label;
     GtkLabel *items_label;
+    GtkLabel *loads_label;
+
+    AdwPreferencesGroup *load_group;
+    GtkLabel *attributes_label;
+    GtkLabel *first_items_label;
+    GtkLabel *total_time_label;
+    GtkLabel *batches_label;
+    GtkLabel *sort_label;
+    GtkLabel *splice_label;
 };
 
 enum
@@ -63,6 +72,15 @@ add_row (AdwPreferencesGroup *group,
     adw_preferences_group_add (group, row);
 
     return GTK_LABEL (label);
+}
+
+static void
+set_row_subtitle (GtkLabel   *label,
+                  const char *subtitle)
+{
+    GtkWidget *row = gtk_widget_get_ancestor (GTK_WIDGET (label), ADW_TYPE_ACTION_ROW);
+
+    adw_action_row_set_subtitle (ADW_ACTION_ROW (row), subtitle);
 }
 
 static AdwPreferencesGroup *
@@ -97,6 +115,38 @@ set_label_uint (GtkLabel *label,
                 guint64   value)
 {
     g_autofree char *text = g_strdup_printf ("%" G_GUINT64_FORMAT, value);
+
+    gtk_label_set_label (label, text);
+}
+
+/* While running and end is not reached yet, shows the time so far with an
+ * ellipsis, so it keeps counting up. */
+static void
+set_label_duration (GtkLabel *label,
+                    gint64    start,
+                    gint64    end,
+                    gboolean  running)
+{
+    if (start == 0 || (end == 0 && !running))
+    {
+        gtk_label_set_label (label, "—");
+    }
+    else
+    {
+        gboolean reached = end != 0;
+        g_autofree char *text = g_strdup_printf ("%.1f ms%s",
+                                                 ((reached ? end : g_get_monotonic_time ()) - start) / 1000.0,
+                                                 reached ? "" : "…");
+
+        gtk_label_set_label (label, text);
+    }
+}
+
+static void
+set_label_ms (GtkLabel *label,
+              gint64    duration)
+{
+    g_autofree char *text = g_strdup_printf ("%.1f ms", duration / 1000.0);
 
     gtk_label_set_label (label, text);
 }
@@ -140,6 +190,7 @@ update_view_stats (NautilusInspectorPage *self,
                    NautilusFilesView     *view,
                    gboolean               picked)
 {
+    const NautilusFilesViewLoadStats *stats = nautilus_files_view_get_load_stats (view);
     GFile *location = nautilus_files_view_get_location (view);
     g_autofree char *uri = location != NULL ? g_file_get_uri (location) : NULL;
     gboolean loading = nautilus_files_view_is_loading (view);
@@ -149,8 +200,34 @@ update_view_stats (NautilusInspectorPage *self,
                                            "Showing the view containing the selected object" :
                                            "Showing the view of the active tab");
     gtk_label_set_label (self->location_label, uri != NULL ? uri : "—");
-    gtk_label_set_label (self->state_label, loading ? "Loading" : "Loaded");
+    gtk_label_set_label (self->state_label,
+                         loading ? "Loading" :
+                                   stats->n_loads == 0 ? "Idle" :
+                                                         stats->all_files_seen ? "Done" : "Stopped");
     set_label_uint (self->items_label, nautilus_files_view_get_n_items (view));
+    set_label_uint (self->loads_label, stats->n_loads);
+
+    adw_preferences_group_set_description (self->load_group,
+                                           stats->n_loads > 0 && stats->start_time == 0 ?
+                                           "Not timed, the inspector was hidden when it started" :
+                                           "Time since the load started");
+
+    set_label_duration (self->attributes_label, stats->start_time, stats->attributes_time, loading);
+    set_label_duration (self->first_items_label, stats->start_time, stats->first_items_time, loading);
+    set_label_duration (self->total_time_label, stats->start_time, loading ? 0 : stats->end_time, loading);
+
+    if (stats->start_time != 0)
+    {
+        set_label_uint (self->batches_label, stats->n_batches);
+        set_label_ms (self->sort_label, stats->sort_duration);
+        set_label_ms (self->splice_label, stats->splice_duration);
+    }
+    else
+    {
+        gtk_label_set_label (self->batches_label, "—");
+        gtk_label_set_label (self->sort_label, "—");
+        gtk_label_set_label (self->splice_label, "—");
+    }
 }
 
 static void
@@ -158,7 +235,9 @@ clear_view_stats (NautilusInspectorPage *self)
 {
     GtkLabel *labels[] =
     {
-        self->location_label, self->state_label, self->items_label,
+        self->location_label, self->state_label, self->items_label, self->loads_label,
+        self->attributes_label, self->first_items_label, self->total_time_label,
+        self->batches_label, self->sort_label, self->splice_label,
     };
 
     adw_preferences_group_set_description (self->view_group, "No view found");
@@ -191,10 +270,24 @@ static void
 build_view_page (NautilusInspectorPage *self,
                  AdwPreferencesPage    *page)
 {
+    AdwPreferencesGroup *group;
+
     self->view_group = add_group (page, "View", NULL);
     self->location_label = add_row (self->view_group, "Location");
     self->state_label = add_row (self->view_group, "State");
     self->items_label = add_row (self->view_group, "Items");
+    self->loads_label = add_row (self->view_group, "Loads in This View");
+
+    self->load_group = group = add_group (page, "Last Load", NULL);
+    self->attributes_label = add_row (group, "Files Listed With Attributes");
+    self->first_items_label = add_row (group, "First Items Shown");
+    self->total_time_label = add_row (group, "Done");
+
+    group = add_group (page, "Adding Items", "Time spent in the view model during the last load");
+    self->batches_label = add_row (group, "Batches");
+    self->sort_label = add_row (group, "Sorting Batches");
+    self->splice_label = add_row (group, "Splicing Into Model");
+    set_row_subtitle (self->splice_label, "Includes re-sorting the view and updating the widgets");
 }
 
 static void

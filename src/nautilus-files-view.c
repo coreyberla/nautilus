@@ -43,6 +43,7 @@
 #include "nautilus-global-preferences.h"
 #include "nautilus-grid-view.h"
 #include "nautilus-grid-view-captions-dialog.h"
+#include "nautilus-inspector-stats.h"
 #include "nautilus-list-view.h"
 #include "nautilus-metadata.h"
 #include "nautilus-mime-actions.h"
@@ -190,6 +191,7 @@ struct _NautilusFilesView
      * after it finishes loading the directory and its view.
      */
     gboolean loading;
+    NautilusFilesViewLoadStats load_stats;
 
     gboolean in_destruction;
 
@@ -3778,6 +3780,12 @@ done_loading (NautilusFilesView *self,
     }
 
     self->loading = FALSE;
+    self->load_stats.all_files_seen = all_files_seen;
+    if (self->load_stats.start_time != 0)
+    {
+        self->load_stats.end_time = g_get_monotonic_time ();
+    }
+
     g_clear_handle_id (&self->transition_timeout_id, g_source_remove);
     g_signal_emit (self, signals[END_LOADING], 0, all_files_seen);
     g_object_notify_by_pspec (G_OBJECT (self), properties[PROP_LOADING]);
@@ -4145,6 +4153,21 @@ nautilus_files_view_add_files (NautilusFilesView *self,
     }
 
     nautilus_view_model_add_items (self->model, items);
+
+    if (self->loading && self->load_stats.start_time != 0 && items != NULL)
+    {
+        gint64 sort_duration, splice_duration;
+
+        nautilus_view_model_get_last_add_times (self->model, &sort_duration, &splice_duration);
+        self->load_stats.sort_duration += sort_duration;
+        self->load_stats.splice_duration += splice_duration;
+        self->load_stats.n_batches += 1;
+
+        if (self->load_stats.first_items_time == 0)
+        {
+            self->load_stats.first_items_time = g_get_monotonic_time ();
+        }
+    }
 
     self->in_progress_selection_source = tmp_source;
 }
@@ -8492,6 +8515,13 @@ load_directory (NautilusFilesView *self,
 
     self->loading = TRUE;
 
+    /* Loads are only timed if the inspector is shown when they start. */
+    self->load_stats = (NautilusFilesViewLoadStats)
+    {
+        .start_time = NAUTILUS_INSPECTOR_STATS_ENABLED () ? g_get_monotonic_time () : 0,
+        .n_loads = self->load_stats.n_loads + 1,
+    };
+
     setup_loading_floating_bar (self);
 
     g_clear_pointer (&self->subdirectories_loading, g_list_free);
@@ -8552,6 +8582,11 @@ static void
 finish_loading (NautilusFilesView *self)
 {
     NautilusAttributes attributes;
+
+    if (self->load_stats.start_time != 0)
+    {
+        self->load_stats.attributes_time = g_get_monotonic_time ();
+    }
 
     emit_begin_loading (self);
 
@@ -9111,6 +9146,12 @@ gboolean
 nautilus_files_view_is_loading (NautilusFilesView *self)
 {
     return self->loading;
+}
+
+const NautilusFilesViewLoadStats *
+nautilus_files_view_get_load_stats (NautilusFilesView *self)
+{
+    return &self->load_stats;
 }
 
 guint

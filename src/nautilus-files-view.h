@@ -60,6 +60,25 @@ nautilus_files_view_set_selection (NautilusFilesView       *self,
 
 gboolean
 nautilus_files_view_is_loading (NautilusFilesView *self);
+
+/* Timestamps are from g_get_monotonic_time(), or 0 if not reached yet or if
+ * the load is not timed. Durations are in µs, summed over every batch of items
+ * added. See nautilus-inspector-stats.h. */
+typedef struct
+{
+    gint64 start_time;
+    gint64 attributes_time;
+    gint64 first_items_time;
+    gint64 end_time;
+    gint64 sort_duration;
+    gint64 splice_duration;
+    guint n_batches;
+    guint n_loads;
+    gboolean all_files_seen;
+} NautilusFilesViewLoadStats;
+
+const NautilusFilesViewLoadStats *
+nautilus_files_view_get_load_stats (NautilusFilesView *self);
 guint
 nautilus_files_view_get_n_items (NautilusFilesView *self);
 gboolean

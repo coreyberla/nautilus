@@ -11,6 +11,7 @@
 
 #include "nautilus-directory.h"
 #include "nautilus-file.h"
+#include "nautilus-inspector-stats.h"
 #include "nautilus-view-item.h"
 
 /**
@@ -51,6 +52,11 @@ struct _NautilusViewModel
     gboolean single_selection;
     gboolean expand_as_a_tree;
     GList *cut_files;
+
+    /* Durations of the last nautilus_view_model_add_items() call, in µs, or 0
+     * if not timed. See nautilus-inspector-stats.h. */
+    gint64 last_add_sort_time;
+    gint64 last_add_splice_time;
 };
 
 static inline GListStore *
@@ -637,10 +643,14 @@ nautilus_view_model_add_items (NautilusViewModel *self,
     g_autoptr (NautilusFile) previous_parent = NULL;
     g_autoptr (GList) sorted_items = NULL;
     NautilusViewItem *item;
+    gboolean timed = NAUTILUS_INSPECTOR_STATS_ENABLED ();
+    gint64 start_time = timed ? g_get_monotonic_time () : 0;
 
     /* The first added file becomes the initial focus and scroll anchor, so we
      * need to sort items before adding them to the internal model. */
     sorted_items = g_list_sort_with_data (g_list_copy (items), compare_data_func, self);
+
+    gint64 sorted_time = timed ? g_get_monotonic_time () : 0;
 
     for (GList *l = sorted_items; l != NULL; l = l->next)
     {
@@ -671,6 +681,18 @@ nautilus_view_model_add_items (NautilusViewModel *self,
         /* Flush the pending items. */
         splice_items_into_common_parent (self, array, previous_parent);
     }
+
+    self->last_add_sort_time = sorted_time - start_time;
+    self->last_add_splice_time = timed ? g_get_monotonic_time () - sorted_time : 0;
+}
+
+void
+nautilus_view_model_get_last_add_times (NautilusViewModel *self,
+                                        gint64            *sort_time,
+                                        gint64            *splice_time)
+{
+    *sort_time = self->last_add_sort_time;
+    *splice_time = self->last_add_splice_time;
 }
 
 void
