@@ -1,0 +1,31 @@
+# Fedora rawhide image for building Nautilus and profiling it with Sysprof.
+# See README.md in this directory.
+FROM registry.fedoraproject.org/fedora:rawhide
+
+# Same package set as the upstream CI image (.gitlab-ci.yml), plus profiling
+# tools and the pieces needed to run sysprofd inside the container.
+RUN dnf install -y \
+        git gcc gdb meson glibc-devel glib2-devel glycin-devel glycin-gtk4-devel \
+        gtk4-devel libadwaita-devel libselinux-devel gettext libgexiv2-devel \
+        localsearch blueprint-compiler gnome-desktop4-devel gnome-autoar-devel \
+        libportal-devel libportal-gtk4-devel libcloudproviders-devel \
+        gstreamer1-devel gstreamer1-plugins-base-devel libicu-devel \
+        tinysparql-devel mutter dbus-daemon dbus-x11 glycin-thumbnailer \
+        glibc-langpack-en adwaita-icon-theme \
+        sysprof sysprof-cli polkit elfutils-debuginfod-client \
+        dnf-plugins-core \
+    && dnf debuginfo-install -y glib2 gtk4 libadwaita glycin-libs \
+        glycin-gtk4-libs tinysparql gnome-desktop4 mutter \
+    && dnf clean all
+
+# Optionally rebuild glib/gtk/libadwaita from git like upstream CI does, for
+# when rawhide lags behind what Nautilus main requires.
+ARG GNOME_FROM_GIT=0
+ENV CFLAGS="-fno-omit-frame-pointer -g"
+COPY .gitlab/image-script.sh /tmp/image-script.sh
+RUN if [ "$GNOME_FROM_GIT" = 1 ]; then \
+        cd /tmp && bash /tmp/image-script.sh; \
+    fi; rm -f /tmp/image-script.sh
+
+ENV LANG=en_US.UTF-8
+WORKDIR /src
