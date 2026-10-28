@@ -58,6 +58,13 @@ struct FilesystemInfoState
     NautilusFile *file;
 };
 
+struct ContentTypeState
+{
+    NautilusDirectory *directory;
+    GCancellable *cancellable;
+    NautilusFile *file;
+};
+
 struct DirectoryLoadState
 {
     NautilusDirectory *directory;
@@ -1576,6 +1583,13 @@ nautilus_async_destroying_file (NautilusFile *file)
         changed = TRUE;
     }
 
+    if (directory->details->content_type_state != NULL &&
+        directory->details->content_type_state->file == file)
+    {
+        directory->details->content_type_state->file = NULL;
+        changed = TRUE;
+    }
+
     /* Let the directory take care of the rest. */
     if (changed)
     {
@@ -1602,6 +1616,17 @@ lacks_info (NautilusFile *file)
 {
     return !file->details->file_info_is_up_to_date
            && !file->details->is_gone;
+}
+
+static gboolean
+lacks_content_type (NautilusFile *file)
+{
+    /* Only regular files with contents can be sniffed. For anything else
+     * the fast content type is all there is. */
+    return !file->details->content_type_is_up_to_date &&
+           file->details->type == G_FILE_TYPE_REGULAR &&
+           file->details->size > 0 &&
+           !file->details->is_gone;
 }
 
 static gboolean
@@ -1742,6 +1767,14 @@ all_attributes_available (NautilusDirectory  *directory,
     if (IS_ATTRIBUTE_SET (attributes, NAUTILUS_ATTRIBUTE_MOUNT))
     {
         if (has_problem (directory, file, lacks_mount))
+        {
+            return FALSE;
+        }
+    }
+
+    if (IS_ATTRIBUTE_SET (attributes, NAUTILUS_ATTRIBUTE_CONTENT_TYPE))
+    {
+        if (has_problem (directory, file, lacks_content_type))
         {
             return FALSE;
         }
@@ -3674,6 +3707,142 @@ filesystem_info_start (NautilusDirectory *directory,
 }
 
 static void
+content_type_cancel (NautilusDirectory *directory)
+{
+    if (directory->details->content_type_state != NULL)
+    {
+        g_cancellable_cancel (directory->details->content_type_state->cancellable);
+        directory->details->content_type_state->directory = NULL;
+        directory->details->content_type_state = NULL;
+        async_job_end (directory, "content type");
+    }
+}
+
+static void
+content_type_stop (NautilusDirectory *directory)
+{
+    if (directory->details->content_type_state != NULL)
+    {
+        NautilusFile *file = directory->details->content_type_state->file;
+
+        if (file != NULL)
+        {
+            g_assert (NAUTILUS_IS_FILE (file));
+            g_assert (file->details->directory == directory);
+            if (is_needy (file,
+                          lacks_content_type,
+                          NAUTILUS_ATTRIBUTE_CONTENT_TYPE))
+            {
+                return;
+            }
+        }
+
+        content_type_cancel (directory);
+    }
+}
+
+static void
+content_type_state_free (ContentTypeState *state)
+{
+    g_clear_object (&state->cancellable);
+    g_free (state);
+}
+
+static void
+got_content_type (ContentTypeState *state,
+                  GFileInfo        *info)
+{
+    g_autoptr (NautilusDirectory) directory = nautilus_directory_ref (state->directory);
+
+    directory->details->content_type_state = NULL;
+    async_job_end (directory, "content type");
+
+    g_autoptr (NautilusFile) file = nautilus_file_ref (state->file);
+
+    if (nautilus_file_update_content_type (file, info))
+    {
+        nautilus_file_changed (file);
+    }
+
+    nautilus_directory_async_state_changed (directory);
+
+    content_type_state_free (state);
+}
+
+static void
+query_content_type_callback (GObject      *source_object,
+                             GAsyncResult *res,
+                             gpointer      user_data)
+{
+    ContentTypeState *state = user_data;
+
+    if (state->directory == NULL)
+    {
+        content_type_state_free (state);
+        return;
+    }
+
+    g_autoptr (GFileInfo) info = g_file_query_info_finish (G_FILE (source_object), res, NULL);
+
+    got_content_type (state, info);
+}
+
+static void
+content_type_start (NautilusDirectory *directory,
+                    NautilusFile      *file,
+                    gboolean          *doing_io)
+{
+    ContentTypeState *state;
+
+    if (directory->details->content_type_state != NULL)
+    {
+        *doing_io = TRUE;
+        return;
+    }
+
+    if (!is_needy (file,
+                   lacks_content_type,
+                   NAUTILUS_ATTRIBUTE_CONTENT_TYPE))
+    {
+        return;
+    }
+
+    /* GIO only sniffs the contents if the name is ambiguous, otherwise
+     * the fast content type is what it would return anyway. */
+    gboolean uncertain = FALSE;
+    g_autofree char *guess = g_content_type_guess (file->details->name, NULL, 0, &uncertain);
+    if (!uncertain)
+    {
+        nautilus_file_update_content_type (file, NULL);
+        return;
+    }
+
+    *doing_io = TRUE;
+
+    if (!async_job_start (directory, "content type"))
+    {
+        return;
+    }
+
+    state = g_new0 (ContentTypeState, 1);
+    state->directory = directory;
+    state->file = file;
+    state->cancellable = g_cancellable_new ();
+
+    directory->details->content_type_state = state;
+
+    g_autoptr (GFile) location = nautilus_file_get_location (file);
+    g_file_query_info_async (location,
+                             G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE ","
+                             G_FILE_ATTRIBUTE_STANDARD_ICON,
+                             G_FILE_QUERY_INFO_NONE,
+                             G_PRIORITY_DEFAULT,
+                             state->cancellable,
+                             query_content_type_callback,
+                             state);
+}
+
+static void
 extension_info_cancel (NautilusDirectory *directory)
 {
     if (directory->details->extension_info_in_progress != NULL)
@@ -3870,6 +4039,7 @@ start_or_stop_io (NautilusDirectory *directory)
     thumbnail_info_stop (directory);
     thumbnail_buf_stop (directory);
     filesystem_info_stop (directory);
+    content_type_stop (directory);
 
     doing_io = FALSE;
     /* Take files that are all done off the queue. */
@@ -3879,6 +4049,7 @@ start_or_stop_io (NautilusDirectory *directory)
 
         /* Start getting attributes if possible */
         file_info_start (directory, file, &doing_io);
+        content_type_start (directory, file, &doing_io);
         thumbnail_info_start (directory, file, &doing_io);
 
         if (doing_io)
@@ -3977,6 +4148,7 @@ nautilus_directory_cancel (NautilusDirectory *directory)
     thumbnail_buf_cancel (directory);
     mount_cancel (directory);
     filesystem_info_cancel (directory);
+    content_type_cancel (directory);
 
     /* We aren't waiting for anything any more. */
     if (waiting_directories != NULL)
@@ -4075,6 +4247,17 @@ cancel_filesystem_info_for_file (NautilusDirectory *directory,
 }
 
 static void
+cancel_content_type_for_file (NautilusDirectory *directory,
+                              NautilusFile      *file)
+{
+    if (directory->details->content_type_state != NULL &&
+        directory->details->content_type_state->file == file)
+    {
+        content_type_cancel (directory);
+    }
+}
+
+static void
 cancel_loading_attributes (NautilusDirectory  *directory,
                            NautilusAttributes  attributes)
 {
@@ -4112,6 +4295,11 @@ cancel_loading_attributes (NautilusDirectory  *directory,
     if (IS_ATTRIBUTE_SET (attributes, NAUTILUS_ATTRIBUTE_MOUNT))
     {
         mount_cancel (directory);
+    }
+
+    if (IS_ATTRIBUTE_SET (attributes, NAUTILUS_ATTRIBUTE_CONTENT_TYPE))
+    {
+        content_type_cancel (directory);
     }
 
     nautilus_directory_async_state_changed (directory);
@@ -4155,6 +4343,10 @@ nautilus_directory_cancel_loading_attributes (NautilusDirectory  *directory,
     if (IS_ATTRIBUTE_SET (attributes, NAUTILUS_ATTRIBUTE_MOUNT))
     {
         cancel_mount_for_file (directory, file);
+    }
+    if (IS_ATTRIBUTE_SET (attributes, NAUTILUS_ATTRIBUTE_CONTENT_TYPE))
+    {
+        cancel_content_type_for_file (directory, file);
     }
 
     nautilus_directory_async_state_changed (directory);

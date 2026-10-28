@@ -534,6 +534,7 @@ nautilus_file_clear_info (NautilusFile *file)
     file->details->symlink_name = NULL;
     g_clear_pointer (&file->details->fast_mime_type, g_ref_string_release);
     g_clear_pointer (&file->details->mime_type, g_ref_string_release);
+    file->details->content_type_is_up_to_date = FALSE;
     g_free (file->details->selinux_context);
     file->details->selinux_context = NULL;
     g_clear_pointer (&file->details->owner, g_ref_string_release);
@@ -2756,6 +2757,8 @@ update_info_internal (NautilusFile *file,
         changed = TRUE;
     }
 
+    /* The info may only have the fast content type, as sniffing is slow.
+     * NAUTILUS_ATTRIBUTE_CONTENT_TYPE fetches the full one when needed. */
     mime_type = g_file_info_get_attribute_string (info,
                                                   G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE);
     const char *fast_mime_type = g_file_info_get_attribute_string (info,
@@ -2782,6 +2785,7 @@ update_info_internal (NautilusFile *file,
             file->details->mime_type = g_ref_string_new_intern (mime_type);
         }
     }
+    file->details->content_type_is_up_to_date = (mime_type != NULL);
 
     selinux_context = g_file_info_get_attribute_string (info, G_FILE_ATTRIBUTE_SELINUX_CONTEXT);
     if (g_set_str (&file->details->selinux_context, selinux_context))
@@ -2889,6 +2893,43 @@ nautilus_file_update_info (NautilusFile *file,
                            GFileInfo    *info)
 {
     return update_info_internal (file, info, FALSE);
+}
+
+gboolean
+nautilus_file_update_content_type (NautilusFile *file,
+                                   GFileInfo    *info)
+{
+    gboolean changed = FALSE;
+
+    file->details->content_type_is_up_to_date = TRUE;
+
+    if (info == NULL)
+    {
+        /* Keep using the fast content type */
+        return changed;
+    }
+
+    const char *mime_type = g_file_info_get_attribute_string (info,
+                                                              G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE);
+    if (mime_type != NULL &&
+        g_strcmp0 (file->details->mime_type, mime_type) != 0)
+    {
+        changed = TRUE;
+        g_clear_pointer (&file->details->mime_type, g_ref_string_release);
+        file->details->mime_type = g_ref_string_new_intern (mime_type);
+    }
+
+    /* The icon from the listing was picked for the fast content type */
+    GIcon *icon = g_file_info_get_icon (info);
+    if (icon != NULL &&
+        !g_icon_equal (icon, file->details->icon))
+    {
+        changed = TRUE;
+        g_clear_object (&file->details->icon);
+        file->details->icon = g_object_ref (icon);
+    }
+
+    return changed;
 }
 
 gboolean
@@ -7660,6 +7701,12 @@ invalidate_mount (NautilusFile *file)
     file->details->mount_is_up_to_date = FALSE;
 }
 
+static void
+invalidate_content_type (NautilusFile *file)
+{
+    file->details->content_type_is_up_to_date = FALSE;
+}
+
 void
 nautilus_file_invalidate_extension_info_internal (NautilusFile *file)
 {
@@ -7708,6 +7755,10 @@ nautilus_file_invalidate_attributes_internal (NautilusFile       *file,
     if (IS_ATTRIBUTE_SET (attributes, NAUTILUS_ATTRIBUTE_MOUNT))
     {
         invalidate_mount (file);
+    }
+    if (IS_ATTRIBUTE_SET (attributes, NAUTILUS_ATTRIBUTE_CONTENT_TYPE))
+    {
+        invalidate_content_type (file);
     }
 
     /* FIXME bugzilla.gnome.org 45075: implement invalidating metadata */
@@ -7783,7 +7834,8 @@ nautilus_file_get_all_attributes (void)
            NAUTILUS_ATTRIBUTE_EXTENSION_INFO |
            NAUTILUS_ATTRIBUTE_THUMBNAIL_INFO |
            NAUTILUS_ATTRIBUTE_THUMBNAIL_BUFFER |
-           NAUTILUS_ATTRIBUTE_MOUNT;
+           NAUTILUS_ATTRIBUTE_MOUNT |
+           NAUTILUS_ATTRIBUTE_CONTENT_TYPE;
 }
 
 void
@@ -8613,6 +8665,9 @@ get_mime_type (NautilusFileInfo *file_info)
  *
  * Return this file's default mime type.
  * @file: NautilusFile representing the file in question.
+ *
+ * This may only be guessed from the file name, unless
+ * NAUTILUS_ATTRIBUTE_CONTENT_TYPE has been requested and is ready.
  *
  * Returns: (transfer none): The mime type.
  *

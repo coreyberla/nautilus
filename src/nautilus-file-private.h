@@ -60,7 +60,7 @@ struct NautilusFilePrivate
 	
 	/* Guessed from the name only */
 	GRefString *fast_mime_type;
-	/* Sniffed from the contents if needed, NULL if not fetched. */
+	/* Sniffed from the contents, NULL if not fetched or if the fast one is accurate */
 	GRefString *mime_type;
 	
 	char *selinux_context;
@@ -126,6 +126,7 @@ struct NautilusFilePrivate
 	guint got_file_info                 : 1;
 	guint get_info_failed               : 1;
 	guint file_info_is_up_to_date       : 1;
+	guint content_type_is_up_to_date    : 1;
 	
 	guint got_directory_count           : 1;
 	guint directory_count_failed        : 1;
@@ -217,6 +218,8 @@ gboolean      nautilus_file_update_info                    (NautilusFile        
 gboolean      nautilus_file_update_name                    (NautilusFile           *file,
 							    const char             *name);
 gboolean      nautilus_file_update_thumbnail_info          (NautilusFile           *file,
+                                                            GFileInfo              *info);
+gboolean      nautilus_file_update_content_type            (NautilusFile           *file,
                                                             GFileInfo              *info);
 gboolean      nautilus_file_update_metadata_from_info      (NautilusFile           *file,
 							    GFileInfo              *info);

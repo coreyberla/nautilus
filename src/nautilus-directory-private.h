@@ -26,6 +26,7 @@ typedef struct ThumbnailInfoState ThumbnailInfoState;
 typedef struct ThumbnailBufState ThumbnailBufState;
 typedef struct MountState MountState;
 typedef struct FilesystemInfoState FilesystemInfoState;
+typedef struct ContentTypeState ContentTypeState;
 
 /* Counts number of attribute requests of one or more files. */
 typedef gint32 RequestCounter[NAUTILUS_ATTRIBUTE_N_TOTAL];
@@ -103,6 +104,8 @@ struct NautilusDirectoryPrivate
 	MountState *mount_state;
 
 	FilesystemInfoState *filesystem_info_state;
+
+	ContentTypeState *content_type_state;
 
 	GList *file_operations_in_progress; /* list of FileOperation * */
 };
