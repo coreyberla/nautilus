@@ -171,10 +171,13 @@ enum
 
 static GParamSpec *properties[N_PROPS] = { NULL, };
 
+/* The full content type if it was fetched, the fast one otherwise */
 static const char *
 peek_mime_type (NautilusFile *file)
 {
-    return file->details->mime_type;
+    return file->details->mime_type != NULL ?
+           file->details->mime_type :
+           file->details->fast_mime_type;
 }
 
 static void
@@ -529,6 +532,7 @@ nautilus_file_clear_info (NautilusFile *file)
     file->details->recency = 0;
     g_free (file->details->symlink_name);
     file->details->symlink_name = NULL;
+    g_clear_pointer (&file->details->fast_mime_type, g_ref_string_release);
     g_clear_pointer (&file->details->mime_type, g_ref_string_release);
     g_free (file->details->selinux_context);
     file->details->selinux_context = NULL;
@@ -862,6 +866,7 @@ finalize (GObject *object)
     }
     g_free (file->details->thumbnail_path);
     g_free (file->details->symlink_name);
+    g_clear_pointer (&file->details->fast_mime_type, g_ref_string_release);
     g_clear_pointer (&file->details->mime_type, g_ref_string_release);
     g_clear_pointer (&file->details->owner, g_ref_string_release);
     g_clear_pointer (&file->details->owner_real, g_ref_string_release);
@@ -2753,15 +2758,29 @@ update_info_internal (NautilusFile *file,
 
     mime_type = g_file_info_get_attribute_string (info,
                                                   G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE);
-    if (mime_type == NULL)
+    const char *fast_mime_type = g_file_info_get_attribute_string (info,
+                                                                   G_FILE_ATTRIBUTE_STANDARD_FAST_CONTENT_TYPE);
+    if (fast_mime_type == NULL)
     {
-        mime_type = g_file_info_get_attribute_string (info, G_FILE_ATTRIBUTE_STANDARD_FAST_CONTENT_TYPE);
+        fast_mime_type = mime_type;
+    }
+    if (g_strcmp0 (file->details->fast_mime_type, fast_mime_type) != 0)
+    {
+        changed = TRUE;
+        g_clear_pointer (&file->details->fast_mime_type, g_ref_string_release);
+        if (fast_mime_type != NULL)
+        {
+            file->details->fast_mime_type = g_ref_string_new_intern (fast_mime_type);
+        }
     }
     if (g_strcmp0 (file->details->mime_type, mime_type) != 0)
     {
         changed = TRUE;
         g_clear_pointer (&file->details->mime_type, g_ref_string_release);
-        file->details->mime_type = g_ref_string_new_intern (mime_type);
+        if (mime_type != NULL)
+        {
+            file->details->mime_type = g_ref_string_new_intern (mime_type);
+        }
     }
 
     selinux_context = g_file_info_get_attribute_string (info, G_FILE_ATTRIBUTE_SELINUX_CONTEXT);

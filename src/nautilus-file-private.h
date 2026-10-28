@@ -58,6 +58,9 @@ struct NautilusFilePrivate
 	
 	char *symlink_name;
 	
+	/* Guessed from the name only */
+	GRefString *fast_mime_type;
+	/* Sniffed from the contents if needed, NULL if not fetched. */
 	GRefString *mime_type;
 	
 	char *selinux_context;
