@@ -2140,7 +2140,10 @@ start_monitoring_file_list (NautilusDirectory *directory)
 
     directory->details->directory_load_in_progress = state;
 
+    /* Start with all types except content_type */
     g_file_enumerate_children_async (directory->details->location,
+                                     g_file_is_native (directory->details->location) ?
+                                     NAUTILUS_FILE_LISTING_ATTRIBUTES :
                                      NAUTILUS_FILE_DEFAULT_ATTRIBUTES,
                                      0,     /* flags */
                                      G_PRIORITY_DEFAULT,     /* prio */
