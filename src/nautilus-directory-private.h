@@ -95,6 +95,7 @@ struct NautilusDirectoryPrivate
 	NautilusInfoProvider *extension_info_provider;
 	NautilusOperationHandle *extension_info_in_progress;
 	guint extension_info_idle;
+	gint64 extension_info_start_time; /* Only set while the inspector is shown. */
 
 	ThumbnailInfoState *thumbnail_info_state;
 

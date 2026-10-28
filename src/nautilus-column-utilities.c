@@ -14,6 +14,7 @@
 #include <nautilus-extension.h>
 #include "nautilus-file.h"
 #include "nautilus-global-preferences.h"
+#include "nautilus-inspector-stats.h"
 #include "nautilus-metadata.h"
 #include "nautilus-module.h"
 
@@ -169,7 +170,15 @@ get_extension_columns (void)
         GList *provider_columns;
 
         provider = NAUTILUS_COLUMN_PROVIDER (l->data);
+
+        gint64 start_time = NAUTILUS_INSPECTOR_STATS_ENABLED () ? g_get_monotonic_time () : 0;
+
         provider_columns = nautilus_column_provider_get_columns (provider);
+        if (start_time != 0)
+        {
+            nautilus_inspector_stats_record_extension_call (provider, NAUTILUS_EXTENSION_CALL_COLUMNS,
+                                                            g_get_monotonic_time () - start_time);
+        }
         columns = g_list_concat (columns, provider_columns);
     }
 

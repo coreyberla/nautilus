@@ -18,6 +18,24 @@ G_BEGIN_DECLS
  * true. When built without the page, it is a constant FALSE and the recording
  * functions below are empty, so the compiler drops all of it. */
 
+typedef enum
+{
+    NAUTILUS_EXTENSION_CALL_INFO,
+    NAUTILUS_EXTENSION_CALL_FILE_MENU,
+    NAUTILUS_EXTENSION_CALL_BACKGROUND_MENU,
+    NAUTILUS_EXTENSION_CALL_COLUMNS,
+    NAUTILUS_EXTENSION_CALL_PROPERTIES,
+    NAUTILUS_EXTENSION_N_CALLS,
+} NautilusExtensionCall;
+
+typedef enum
+{
+    NAUTILUS_EXTENSION_INFO_ASYNC,
+    NAUTILUS_EXTENSION_INFO_FAILED,
+    NAUTILUS_EXTENSION_INFO_CANCELLED,
+    NAUTILUS_EXTENSION_N_INFO_OUTCOMES,
+} NautilusExtensionInfoOutcome;
+
 /* Durations are in µs. */
 typedef struct
 {
@@ -25,6 +43,12 @@ typedef struct
     gint64 total_time;
     gint64 max_time;
 } NautilusTimingStats;
+
+typedef struct
+{
+    NautilusTimingStats calls[NAUTILUS_EXTENSION_N_CALLS];
+    guint info_outcomes[NAUTILUS_EXTENSION_N_INFO_OUTCOMES];
+} NautilusExtensionStats;
 
 #define NAUTILUS_SEARCH_MAX_PROVIDERS 4
 
@@ -91,6 +115,13 @@ void nautilus_inspector_stats_set_shown (gboolean shown);
 void nautilus_inspector_stats_add_timing (NautilusTimingStats *timing,
                                           gint64               duration);
 
+void nautilus_inspector_stats_record_extension_call (gpointer              provider,
+                                                     NautilusExtensionCall call,
+                                                     gint64                duration);
+void nautilus_inspector_stats_record_extension_info_outcome (gpointer                     provider,
+                                                             NautilusExtensionInfoOutcome outcome);
+const NautilusExtensionStats *nautilus_inspector_stats_get_extension (gpointer provider);
+
 void nautilus_inspector_stats_record_search_start (NautilusSearchStats *search,
                                                    const char          *text);
 void nautilus_inspector_stats_record_search_provider_start (NautilusSearchStats *search,
@@ -115,6 +146,19 @@ const NautilusSearchStats *nautilus_inspector_stats_get_shell_search (void);
 /* The arguments are still type-checked, but never evaluated. */
 #define NAUTILUS_INSPECTOR_STATS_ADD(field, n) G_STMT_START { if (0) { (void) (n); } } G_STMT_END
 #define NAUTILUS_INSPECTOR_STATS_ADD_TIMING(field, duration) G_STMT_START { if (0) { (void) (duration); } } G_STMT_END
+
+static inline void
+nautilus_inspector_stats_record_extension_call (gpointer              provider,
+                                                NautilusExtensionCall call,
+                                                gint64                duration)
+{
+}
+
+static inline void
+nautilus_inspector_stats_record_extension_info_outcome (gpointer                     provider,
+                                                        NautilusExtensionInfoOutcome outcome)
+{
+}
 
 static inline void
 nautilus_inspector_stats_record_search_start (NautilusSearchStats *search,

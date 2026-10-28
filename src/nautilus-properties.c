@@ -24,6 +24,7 @@
 #include "nautilus-file-operations.h"
 #include "nautilus-file-utilities.h"
 #include "nautilus-image.h"
+#include "nautilus-inspector-stats.h"
 #include "nautilus-metadata.h"
 #include "nautilus-module.h"
 #include "nautilus-scheme.h"
@@ -3532,7 +3533,14 @@ refresh_extension_model_pages (NautilusPropertiesWidget *self)
 
     for (GList *l = providers; l != NULL; l = l->next)
     {
+        gint64 start_time = NAUTILUS_INSPECTOR_STATS_ENABLED () ? g_get_monotonic_time () : 0;
         GList *models = nautilus_properties_model_provider_get_models (l->data, self->files);
+
+        if (start_time != 0)
+        {
+            nautilus_inspector_stats_record_extension_call (l->data, NAUTILUS_EXTENSION_CALL_PROPERTIES,
+                                                            g_get_monotonic_time () - start_time);
+        }
 
         all_models = g_list_concat (all_models, models);
     }

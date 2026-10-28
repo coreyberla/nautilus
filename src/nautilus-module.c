@@ -117,6 +117,21 @@ module_object_weak_notify (gpointer  user_data,
     module_objects = g_list_remove (module_objects, object);
 }
 
+static GObject *
+add_type (GType type)
+{
+    GObject *object;
+
+    object = g_object_new (type, NULL);
+    g_object_weak_ref (object,
+                       (GWeakNotify) module_object_weak_notify,
+                       NULL);
+
+    module_objects = g_list_prepend (module_objects, object);
+
+    return object;
+}
+
 static void
 add_module_objects (NautilusModule *module)
 {
@@ -132,7 +147,11 @@ add_module_objects (NautilusModule *module)
         {
             break;
         }
-        nautilus_module_add_type (types[i]);
+
+        GObject *object = add_type (types[i]);
+
+        /* Modules are never unloaded, so the path outlives the object. */
+        g_object_set_data (object, "nautilus-module-path", module->path);
     }
 }
 
@@ -281,12 +300,17 @@ nautilus_module_extension_list_free (GList *extensions)
 void
 nautilus_module_add_type (GType type)
 {
-    GObject *object;
+    add_type (type);
+}
 
-    object = g_object_new (type, NULL);
-    g_object_weak_ref (object,
-                       (GWeakNotify) module_object_weak_notify,
-                       NULL);
+GList *
+nautilus_module_get_all_extensions (void)
+{
+    return g_list_reverse (g_list_copy_deep (module_objects, (GCopyFunc) g_object_ref, NULL));
+}
 
-    module_objects = g_list_prepend (module_objects, object);
+const char *
+nautilus_module_get_extension_path (GObject *extension)
+{
+    return g_object_get_data (extension, "nautilus-module-path");
 }

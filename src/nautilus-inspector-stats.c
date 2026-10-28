@@ -14,6 +14,10 @@
 gboolean nautilus_inspector_stats_enabled = FALSE;
 NautilusInspectorStats nautilus_inspector_stats = { 0 };
 
+/* Extension provider → NautilusExtensionStats. Providers live as long as the
+ * application, so they are not referenced. */
+static GHashTable *extension_stats = NULL;
+
 static NautilusSearchStats *shell_search = NULL;
 
 void
@@ -29,6 +33,47 @@ nautilus_inspector_stats_add_timing (NautilusTimingStats *timing,
     timing->n_calls += 1;
     timing->total_time += duration;
     timing->max_time = MAX (timing->max_time, duration);
+}
+
+static NautilusExtensionStats *
+ensure_extension_stats (gpointer provider)
+{
+    NautilusExtensionStats *stats;
+
+    if (extension_stats == NULL)
+    {
+        extension_stats = g_hash_table_new_full (NULL, NULL, NULL, g_free);
+    }
+
+    stats = g_hash_table_lookup (extension_stats, provider);
+    if (stats == NULL)
+    {
+        stats = g_new0 (NautilusExtensionStats, 1);
+        g_hash_table_insert (extension_stats, provider, stats);
+    }
+
+    return stats;
+}
+
+void
+nautilus_inspector_stats_record_extension_call (gpointer              provider,
+                                                NautilusExtensionCall call,
+                                                gint64                duration)
+{
+    nautilus_inspector_stats_add_timing (&ensure_extension_stats (provider)->calls[call], duration);
+}
+
+void
+nautilus_inspector_stats_record_extension_info_outcome (gpointer                     provider,
+                                                        NautilusExtensionInfoOutcome outcome)
+{
+    ensure_extension_stats (provider)->info_outcomes[outcome] += 1;
+}
+
+const NautilusExtensionStats *
+nautilus_inspector_stats_get_extension (gpointer provider)
+{
+    return extension_stats != NULL ? g_hash_table_lookup (extension_stats, provider) : NULL;
 }
 
 static NautilusSearchProviderStats *

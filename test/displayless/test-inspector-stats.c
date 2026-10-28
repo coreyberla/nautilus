@@ -47,6 +47,36 @@ test_counters_only_while_shown (void)
 }
 
 static void
+test_extension_calls (void)
+{
+    g_autoptr (GObject) provider = g_object_new (G_TYPE_OBJECT, NULL);
+    g_autoptr (GObject) other_provider = g_object_new (G_TYPE_OBJECT, NULL);
+    const NautilusExtensionStats *stats;
+
+    g_assert_null (nautilus_inspector_stats_get_extension (provider));
+
+    nautilus_inspector_stats_record_extension_call (provider, NAUTILUS_EXTENSION_CALL_INFO, 100);
+    nautilus_inspector_stats_record_extension_call (provider, NAUTILUS_EXTENSION_CALL_INFO, 300);
+    nautilus_inspector_stats_record_extension_call (provider, NAUTILUS_EXTENSION_CALL_FILE_MENU, 50);
+    nautilus_inspector_stats_record_extension_info_outcome (provider, NAUTILUS_EXTENSION_INFO_ASYNC);
+    nautilus_inspector_stats_record_extension_info_outcome (provider, NAUTILUS_EXTENSION_INFO_CANCELLED);
+
+    stats = nautilus_inspector_stats_get_extension (provider);
+    g_assert_nonnull (stats);
+    g_assert_cmpuint (stats->calls[NAUTILUS_EXTENSION_CALL_INFO].n_calls, ==, 2);
+    g_assert_cmpint (stats->calls[NAUTILUS_EXTENSION_CALL_INFO].total_time, ==, 400);
+    g_assert_cmpint (stats->calls[NAUTILUS_EXTENSION_CALL_INFO].max_time, ==, 300);
+    g_assert_cmpuint (stats->calls[NAUTILUS_EXTENSION_CALL_FILE_MENU].n_calls, ==, 1);
+    g_assert_cmpuint (stats->calls[NAUTILUS_EXTENSION_CALL_COLUMNS].n_calls, ==, 0);
+    g_assert_cmpuint (stats->info_outcomes[NAUTILUS_EXTENSION_INFO_ASYNC], ==, 1);
+    g_assert_cmpuint (stats->info_outcomes[NAUTILUS_EXTENSION_INFO_FAILED], ==, 0);
+    g_assert_cmpuint (stats->info_outcomes[NAUTILUS_EXTENSION_INFO_CANCELLED], ==, 1);
+
+    /* Providers are tracked separately. */
+    g_assert_null (nautilus_inspector_stats_get_extension (other_provider));
+}
+
+static void
 test_search_not_timed_while_hidden (void)
 {
     g_autoptr (GObject) provider = g_object_new (G_TYPE_OBJECT, NULL);
@@ -178,6 +208,8 @@ main (int   argc,
                      test_timing);
     g_test_add_func ("/inspector-stats/counters-only-while-shown",
                      test_counters_only_while_shown);
+    g_test_add_func ("/inspector-stats/extension-calls",
+                     test_extension_calls);
     g_test_add_func ("/inspector-stats/search-not-timed-while-hidden",
                      test_search_not_timed_while_hidden);
     g_test_add_func ("/inspector-stats/search-providers",

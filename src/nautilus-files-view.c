@@ -4868,8 +4868,16 @@ get_extension_selection_menu_items (NautilusFilesView *view)
         GList *file_items;
 
         provider = NAUTILUS_MENU_PROVIDER (l->data);
+
+        gint64 start_time = NAUTILUS_INSPECTOR_STATS_ENABLED () ? g_get_monotonic_time () : 0;
+
         file_items = nautilus_menu_provider_get_file_items (provider,
                                                             selection);
+        if (start_time != 0)
+        {
+            nautilus_inspector_stats_record_extension_call (provider, NAUTILUS_EXTENSION_CALL_FILE_MENU,
+                                                            g_get_monotonic_time () - start_time);
+        }
         items = g_list_concat (items, file_items);
     }
 
@@ -4896,8 +4904,16 @@ get_extension_background_menu_items (NautilusFilesView *self)
 
         provider = NAUTILUS_MENU_PROVIDER (l->data);
         file_info = NAUTILUS_FILE_INFO (self->directory_as_file);
+
+        gint64 start_time = NAUTILUS_INSPECTOR_STATS_ENABLED () ? g_get_monotonic_time () : 0;
+
         file_items = nautilus_menu_provider_get_background_items (provider,
                                                                   file_info);
+        if (start_time != 0)
+        {
+            nautilus_inspector_stats_record_extension_call (provider, NAUTILUS_EXTENSION_CALL_BACKGROUND_MENU,
+                                                            g_get_monotonic_time () - start_time);
+        }
         items = g_list_concat (items, file_items);
     }
 

@@ -4,20 +4,23 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-/* A page in the GTK Inspector showing statistics about Files. The view
- * statistics follow the view of the active tab in the most recently focused
- * window, or the view containing the widget picked in the Objects page.
- * Statistics are only collected while the inspector is shown, see
- * nautilus-inspector-stats.h. */
+/* A page in the GTK Inspector showing loading, search, directory, thumbnailing
+ * and extension statistics. The view statistics follow the view of the active
+ * tab in the most recently focused window, or the view containing the widget
+ * picked in the Objects page. Statistics are only collected while the
+ * inspector is shown, see nautilus-inspector-stats.h. */
 
 #define G_LOG_DOMAIN "nautilus-inspector-page"
 
 #include "nautilus-inspector-page.h"
 
+#include <nautilus-extension.h>
+
 #include "nautilus-directory.h"
 #include "nautilus-files-view.h"
 #include "nautilus-image.h"
 #include "nautilus-inspector-stats.h"
+#include "nautilus-module.h"
 #include "nautilus-search-directory.h"
 #include "nautilus-thumbnails.h"
 #include "nautilus-window.h"
@@ -66,6 +69,12 @@ typedef struct
     GtkLabel *total_label;
     GtkLabel *engine_labels[G_N_ELEMENTS (search_engines)];
 } SearchWidgets;
+
+typedef struct
+{
+    GObject *extension;
+    GtkLabel *call_labels[NAUTILUS_EXTENSION_N_CALLS];
+} ExtensionWidgets;
 
 struct _NautilusInspectorPage
 {
@@ -126,6 +135,10 @@ struct _NautilusInspectorPage
     GtkLabel *thumbnails_generated_label;
     GtkLabel *thumbnails_failed_label;
     GtkLabel *thumbnail_cache_label;
+
+    /* Extensions */
+    AdwPreferencesPage *extensions_page;
+    GArray *extension_widgets;
 };
 
 enum
@@ -619,6 +632,36 @@ update_app_stats (NautilusInspectorPage *self)
     gtk_label_set_label (self->thumbnail_cache_label, cache_size);
 }
 
+static void
+update_extension_stats (NautilusInspectorPage *self)
+{
+    for (guint i = 0; i < self->extension_widgets->len; i++)
+    {
+        ExtensionWidgets *widgets = &g_array_index (self->extension_widgets, ExtensionWidgets, i);
+        const NautilusExtensionStats *stats = nautilus_inspector_stats_get_extension (widgets->extension);
+
+        for (guint call = 0; call < NAUTILUS_EXTENSION_N_CALLS; call++)
+        {
+            if (widgets->call_labels[call] != NULL)
+            {
+                set_label_timing (widgets->call_labels[call], stats != NULL ? &stats->calls[call] : NULL);
+            }
+        }
+
+        if (widgets->call_labels[NAUTILUS_EXTENSION_CALL_INFO] != NULL)
+        {
+            static const guint no_outcomes[NAUTILUS_EXTENSION_N_INFO_OUTCOMES] = { 0 };
+            const guint *outcomes = stats != NULL ? stats->info_outcomes : no_outcomes;
+            g_autofree char *subtitle = g_strdup_printf ("%u asynchronous · %u failed · %u cancelled",
+                                                         outcomes[NAUTILUS_EXTENSION_INFO_ASYNC],
+                                                         outcomes[NAUTILUS_EXTENSION_INFO_FAILED],
+                                                         outcomes[NAUTILUS_EXTENSION_INFO_CANCELLED]);
+
+            set_row_subtitle (widgets->call_labels[NAUTILUS_EXTENSION_CALL_INFO], subtitle);
+        }
+    }
+}
+
 static gboolean
 refresh (gpointer user_data)
 {
@@ -637,6 +680,7 @@ refresh (gpointer user_data)
     update_view_search_stats (self, view);
 
     update_app_stats (self);
+    update_extension_stats (self);
 
     return G_SOURCE_CONTINUE;
 }
@@ -730,6 +774,55 @@ build_app_page (NautilusInspectorPage *self,
     self->thumbnails_generated_label = add_row (group, "Generated");
     self->thumbnails_failed_label = add_row (group, "Failed");
     self->thumbnail_cache_label = add_row (group, "Memory Cache");
+}
+
+static void
+build_extensions_page (NautilusInspectorPage *self)
+{
+    /* Extensions are loaded once at startup, before the inspector exists. */
+    g_autolist (GObject) extensions = nautilus_module_get_all_extensions ();
+
+    if (extensions == NULL)
+    {
+        add_group (self->extensions_page, "No Extensions",
+                   "No extensions are loaded, or NAUTILUS_DISABLE_PLUGINS is set");
+        return;
+    }
+
+    for (GList *l = extensions; l != NULL; l = l->next)
+    {
+        GObject *extension = l->data;
+        const char *path = nautilus_module_get_extension_path (extension);
+        g_autofree char *module_name = path != NULL ? g_path_get_basename (path) : NULL;
+        AdwPreferencesGroup *group = add_group (self->extensions_page,
+                                                G_OBJECT_TYPE_NAME (extension),
+                                                module_name != NULL ? module_name : "Built in");
+        ExtensionWidgets widgets = { .extension = extension };
+
+        if (NAUTILUS_IS_INFO_PROVIDER (extension))
+        {
+            widgets.call_labels[NAUTILUS_EXTENSION_CALL_INFO] = add_row (group, "File Info");
+        }
+        if (NAUTILUS_IS_MENU_PROVIDER (extension))
+        {
+            widgets.call_labels[NAUTILUS_EXTENSION_CALL_FILE_MENU] = add_row (group, "File Menu Items");
+            widgets.call_labels[NAUTILUS_EXTENSION_CALL_BACKGROUND_MENU] = add_row (group, "Background Menu Items");
+        }
+        if (NAUTILUS_IS_COLUMN_PROVIDER (extension))
+        {
+            widgets.call_labels[NAUTILUS_EXTENSION_CALL_COLUMNS] = add_row (group, "Columns");
+        }
+        if (NAUTILUS_IS_PROPERTIES_MODEL_PROVIDER (extension))
+        {
+            widgets.call_labels[NAUTILUS_EXTENSION_CALL_PROPERTIES] = add_row (group, "Properties");
+        }
+        if (path != NULL)
+        {
+            gtk_label_set_label (add_row (group, "Module"), path);
+        }
+
+        g_array_append_val (self->extension_widgets, widgets);
+    }
 }
 
 static void
@@ -856,6 +949,7 @@ nautilus_inspector_page_finalize (GObject *object)
     NautilusInspectorPage *self = NAUTILUS_INSPECTOR_PAGE (object);
 
     g_clear_pointer (&self->directory_rows, g_ptr_array_unref);
+    g_clear_pointer (&self->extension_widgets, g_array_unref);
 
     G_OBJECT_CLASS (nautilus_inspector_page_parent_class)->finalize (object);
 }
@@ -868,9 +962,12 @@ nautilus_inspector_page_init (NautilusInspectorPage *self)
     GtkWidget *switcher = adw_view_switcher_new ();
 
     self->directory_rows = g_ptr_array_new ();
+    self->extension_widgets = g_array_new (FALSE, TRUE, sizeof (ExtensionWidgets));
 
     build_view_page (self, add_page (stack, "view", "View", "folder-symbolic"));
     build_app_page (self, add_page (stack, "app", "App-wide", "view-grid-symbolic"));
+    self->extensions_page = add_page (stack, "extensions", "Extensions", "application-x-addon-symbolic");
+    build_extensions_page (self);
 
     adw_view_switcher_set_stack (ADW_VIEW_SWITCHER (switcher), stack);
     adw_view_switcher_set_policy (ADW_VIEW_SWITCHER (switcher), ADW_VIEW_SWITCHER_POLICY_WIDE);

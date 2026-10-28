@@ -3709,8 +3709,15 @@ extension_info_cancel (NautilusDirectory *directory)
             nautilus_info_provider_cancel_update
                 (directory->details->extension_info_provider,
                 directory->details->extension_info_in_progress);
+
+            if (directory->details->extension_info_start_time != 0)
+            {
+                nautilus_inspector_stats_record_extension_info_outcome (directory->details->extension_info_provider,
+                                                                        NAUTILUS_EXTENSION_INFO_CANCELLED);
+            }
         }
 
+        directory->details->extension_info_start_time = 0;
         directory->details->extension_info_in_progress = NULL;
         directory->details->extension_info_file = NULL;
         directory->details->extension_info_provider = NULL;
@@ -3786,6 +3793,15 @@ info_provider_idle_callback (gpointer user_data)
         NautilusFile *file;
         async_job_end (directory, "extension info");
 
+        if (directory->details->extension_info_start_time != 0)
+        {
+            nautilus_inspector_stats_record_extension_call (response->provider,
+                                                            NAUTILUS_EXTENSION_CALL_INFO,
+                                                            g_get_monotonic_time () -
+                                                            directory->details->extension_info_start_time);
+        }
+        directory->details->extension_info_start_time = 0;
+
         file = g_steal_pointer (&directory->details->extension_info_file);
         directory->details->extension_info_provider = NULL;
         directory->details->extension_info_in_progress = NULL;
@@ -3852,6 +3868,8 @@ extension_info_start (NautilusDirectory *directory,
     g_closure_set_marshal (update_complete,
                            g_cclosure_marshal_generic);
 
+    gint64 start_time = NAUTILUS_INSPECTOR_STATS_ENABLED () ? g_get_monotonic_time () : 0;
+
     result = nautilus_info_provider_update_file_info
                  (provider,
                  NAUTILUS_FILE_INFO (file),
@@ -3859,6 +3877,19 @@ extension_info_start (NautilusDirectory *directory,
                  &handle);
 
     g_closure_unref (update_complete);
+
+    if (start_time != 0 && result != NAUTILUS_OPERATION_IN_PROGRESS)
+    {
+        nautilus_inspector_stats_record_extension_call (provider, NAUTILUS_EXTENSION_CALL_INFO,
+                                                        g_get_monotonic_time () - start_time);
+    }
+    if (start_time != 0 && result != NAUTILUS_OPERATION_COMPLETE)
+    {
+        nautilus_inspector_stats_record_extension_info_outcome (provider,
+                                                                result == NAUTILUS_OPERATION_FAILED ?
+                                                                NAUTILUS_EXTENSION_INFO_FAILED :
+                                                                NAUTILUS_EXTENSION_INFO_ASYNC);
+    }
 
     if (result == NAUTILUS_OPERATION_COMPLETE ||
         result == NAUTILUS_OPERATION_FAILED)
@@ -3868,6 +3899,8 @@ extension_info_start (NautilusDirectory *directory,
     }
     else
     {
+        /* The time until it completes is recorded in info_provider_idle_callback(). */
+        directory->details->extension_info_start_time = start_time;
         directory->details->extension_info_in_progress = handle;
         directory->details->extension_info_provider = provider;
         directory->details->extension_info_file = file;

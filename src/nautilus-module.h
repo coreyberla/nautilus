@@ -20,6 +20,11 @@ GList *nautilus_module_get_extensions_for_type (GType  type);
 void   nautilus_module_extension_list_free     (GList *list);
 gchar *nautilus_module_get_installed_module_names (void);
 
+/* For debugging: every extension object, in load order, and the path of the
+ * module that provided it, or NULL. */
+GList      *nautilus_module_get_all_extensions (void);
+const char *nautilus_module_get_extension_path (GObject *extension);
+
 
 /* Add a type to the module interface - allows nautilus to add its own modules
  * without putting them in separate shared libraries */
