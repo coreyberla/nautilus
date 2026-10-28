@@ -9113,6 +9113,12 @@ nautilus_files_view_is_loading (NautilusFilesView *self)
     return self->loading;
 }
 
+guint
+nautilus_files_view_get_n_items (NautilusFilesView *self)
+{
+    return self->model != NULL ? g_list_model_get_n_items (G_LIST_MODEL (self->model)) : 0;
+}
+
 static void
 nautilus_files_view_constructed (GObject *object)
 {

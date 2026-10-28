@@ -152,6 +152,7 @@ libnautilus_sources = [
   'nautilus-icon-names.h',
   'nautilus-image.c',
   'nautilus-image.h',
+  'nautilus-inspector-stats.h',
   'nautilus-internal-place-file.c',
   'nautilus-internal-place-file.h',
   'nautilus-keyfile-metadata.c',
@@ -292,6 +293,14 @@ libnautilus_sources = [
   'nautilus-x-content-bar.c',
   'nautilus-x-content-bar.h',
 ]
+
+if get_option('inspector-page')
+  libnautilus_sources += [
+    'nautilus-inspector-page.c',
+    'nautilus-inspector-page.h',
+    'nautilus-inspector-stats.c',
+  ]
+endif
 
 nautilus_deps = [
   cloudproviders,

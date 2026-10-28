@@ -197,6 +197,7 @@ conf.set_quoted('VERSION', version_string)
 
 conf.set('HAVE_SELINUX', selinux.found())
 conf.set('HAVE_CLOUDPROVIDERS', cloudproviders.found())
+conf.set('ENABLE_INSPECTOR_PAGE', get_option('inspector-page'))
 
 conf.set('HAVE_MALLOC_TRIM', cc.has_function('malloc_trim'))
 
@@ -271,6 +272,7 @@ summary(
     'Extensions': get_option('extensions'),
     'Cloud providers support': cloudproviders.found(),
     'SELinux support': selinux.found(),
+    'Inspector page': get_option('inspector-page'),
   },
   section: 'Features',
   bool_yn: true,

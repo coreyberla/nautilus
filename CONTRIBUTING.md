@@ -19,6 +19,32 @@ issue number if applicable) and so forth. Be concise but not too brief.
 Closes #1234
 ```
 
+## Inspector Page
+
+For debugging performance, Files can add a page to the
+[GTK Inspector](https://developer.gnome.org/documentation/tools/inspector.html)
+with statistics about loading folders, searching, thumbnails, the directory
+cache and extensions. It is not built by default:
+
+```bash
+meson setup -Dinspector-page=true _build
+```
+
+Enable the inspector keyboard shortcut, then press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd>
+in Files and open the "Files" tab:
+
+```bash
+gsettings set org.gtk.gtk4.Settings.Debug enable-inspector-keybinding true
+```
+
+Running with `GTK_DEBUG=interactive` does not show the page, because the
+inspector is then created before Files registers it.
+
+Statistics are only collected while the inspector is shown, so open it before
+loading the folder or starting the search you want to look at. The "View" tab
+follows the active tab of the most recently focused window, or the view
+containing the widget picked in the "Objects" tab.
+
 ## File Chooser
 
 Developing for the nautilus file chooser may be complicated because of the

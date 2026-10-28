@@ -60,6 +60,8 @@ nautilus_files_view_set_selection (NautilusFilesView       *self,
 
 gboolean
 nautilus_files_view_is_loading (NautilusFilesView *self);
+guint
+nautilus_files_view_get_n_items (NautilusFilesView *self);
 gboolean
 nautilus_files_view_is_searching (NautilusFilesView *self);
 

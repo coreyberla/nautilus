@@ -41,6 +41,12 @@ option(
   deprecated: {'true': 'enabled', 'false': 'disabled'},
   description: 'Enable the cloudproviders support',
 )
+option(
+  'inspector-page',
+  type: 'boolean',
+  value: false,
+  description: 'Build a GTK Inspector page with view loading and thumbnailing statistics',
+)
 ################
 # End features #
 ################

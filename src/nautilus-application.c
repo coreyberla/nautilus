@@ -37,6 +37,9 @@
 #include "nautilus-freedesktop-dbus.h"
 #include "nautilus-global-preferences.h"
 #include "nautilus-icon-info.h"
+#ifdef ENABLE_INSPECTOR_PAGE
+#include "nautilus-inspector-page.h"
+#endif
 #include "nautilus-module.h"
 #include "nautilus-portal.h"
 #include "nautilus-preferences-dialog.h"
@@ -1013,6 +1016,10 @@ nautilus_application_startup (GApplication *app)
     G_APPLICATION_CLASS (nautilus_application_parent_class)->startup (G_APPLICATION (self));
 
     gtk_window_set_default_icon_name (APPLICATION_ID);
+
+#ifdef ENABLE_INSPECTOR_PAGE
+    nautilus_inspector_page_register ();
+#endif
 
     /* initialize preferences and create the global GSettings objects */
     nautilus_global_preferences_init ();
