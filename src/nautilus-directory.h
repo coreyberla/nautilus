@@ -230,3 +230,32 @@ gboolean           nautilus_directory_is_editable              (NautilusDirector
 void               nautilus_directory_dump                     (NautilusDirectory         *directory);
 
 NautilusFile *     nautilus_directory_new_as_file              (NautilusDirectory *directory);
+
+/* For debugging: the state of all directories currently in memory. */
+typedef struct
+{
+    guint n_directories;
+    guint n_fully_loaded;
+    guint n_files;
+    guint n_watched;
+    guint n_monitors;
+    guint n_files_queued;
+    guint n_async_jobs;
+    guint n_async_jobs_max;
+    guint n_waiting_for_job;
+} NautilusDirectoryCacheStats;
+
+void               nautilus_directory_get_cache_stats          (NautilusDirectoryCacheStats *stats);
+
+typedef struct
+{
+    char *uri;
+    guint ref_count;
+    guint n_files;
+    guint n_monitors;
+    gboolean fully_loaded;
+    gboolean watched;
+} NautilusDirectoryDebugInfo;
+
+/* Returns an array of NautilusDirectoryDebugInfo, sorted by URI. */
+GArray *           nautilus_directory_get_debug_infos          (void);

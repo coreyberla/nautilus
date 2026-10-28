@@ -125,6 +125,9 @@ void               nautilus_directory_cancel_callback_internal        (NautilusD
 								       NautilusDirectoryCallback  directory_callback,
 								       NautilusFileCallback       file_callback,
 								       gpointer                   callback_data);
+void               nautilus_directory_get_async_job_stats             (guint                     *n_running,
+								       guint                     *n_max,
+								       guint                     *n_waiting);
 void               nautilus_directory_monitor_add_internal            (NautilusDirectory         *directory,
 								       NautilusFile              *file,
 								       gconstpointer              client,

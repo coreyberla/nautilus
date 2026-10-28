@@ -139,6 +139,16 @@ static GHashTable *waiting_directories;
 static GHashTable *async_jobs;
 #endif
 
+void
+nautilus_directory_get_async_job_stats (guint *n_running,
+                                        guint *n_max,
+                                        guint *n_waiting)
+{
+    *n_running = async_job_count;
+    *n_max = MAX_ASYNC_JOBS;
+    *n_waiting = waiting_directories != NULL ? g_hash_table_size (waiting_directories) : 0;
+}
+
 /* Forward declarations for functions that need them. */
 static void     deep_count_load (DeepCountState *state,
                                  GFile          *location);

@@ -1660,3 +1660,103 @@ nautilus_directory_dump (NautilusDirectory *directory)
     g_print ("uri: %s\n", uri);
     g_print ("ref count: %d\n", G_OBJECT (directory)->ref_count);
 }
+
+static guint
+count_monitors (NautilusDirectory *directory)
+{
+    GHashTableIter iter;
+    GList *monitors;
+    guint n_monitors = 0;
+
+    g_hash_table_iter_init (&iter, directory->details->monitor_table);
+    while (g_hash_table_iter_next (&iter, NULL, (gpointer *) &monitors))
+    {
+        n_monitors += g_list_length (monitors);
+    }
+
+    return n_monitors;
+}
+
+void
+nautilus_directory_get_cache_stats (NautilusDirectoryCacheStats *stats)
+{
+    memset (stats, 0, sizeof (*stats));
+
+    nautilus_directory_get_async_job_stats (&stats->n_async_jobs,
+                                            &stats->n_async_jobs_max,
+                                            &stats->n_waiting_for_job);
+
+    if (directories == NULL)
+    {
+        return;
+    }
+
+    GHashTableIter iter;
+    NautilusDirectory *directory;
+
+    g_hash_table_iter_init (&iter, directories);
+    while (g_hash_table_iter_next (&iter, NULL, (gpointer *) &directory))
+    {
+        NautilusDirectoryPrivate *details = directory->details;
+
+        stats->n_directories += 1;
+        stats->n_fully_loaded += details->directory_loaded ? 1 : 0;
+        stats->n_files += g_hash_table_size (details->file_hash);
+        stats->n_watched += details->monitor != NULL ? 1 : 0;
+        stats->n_monitors += count_monitors (directory);
+        stats->n_files_queued += nautilus_hash_queue_get_length (details->high_priority_queue) +
+                                 nautilus_hash_queue_get_length (details->low_priority_queue) +
+                                 nautilus_hash_queue_get_length (details->extension_queue);
+    }
+}
+
+static void
+debug_info_clear (NautilusDirectoryDebugInfo *info)
+{
+    g_free (info->uri);
+}
+
+static gint
+debug_info_compare (gconstpointer a,
+                    gconstpointer b)
+{
+    return g_strcmp0 (((const NautilusDirectoryDebugInfo *) a)->uri,
+                      ((const NautilusDirectoryDebugInfo *) b)->uri);
+}
+
+GArray *
+nautilus_directory_get_debug_infos (void)
+{
+    GArray *infos = g_array_new (FALSE, TRUE, sizeof (NautilusDirectoryDebugInfo));
+
+    g_array_set_clear_func (infos, (GDestroyNotify) debug_info_clear);
+
+    if (directories == NULL)
+    {
+        return infos;
+    }
+
+    GHashTableIter iter;
+    NautilusDirectory *directory;
+
+    g_hash_table_iter_init (&iter, directories);
+    while (g_hash_table_iter_next (&iter, NULL, (gpointer *) &directory))
+    {
+        NautilusDirectoryPrivate *details = directory->details;
+        NautilusDirectoryDebugInfo info =
+        {
+            .uri = g_file_get_uri (details->location),
+            .ref_count = G_OBJECT (directory)->ref_count,
+            .n_files = g_hash_table_size (details->file_hash),
+            .n_monitors = count_monitors (directory),
+            .fully_loaded = details->directory_loaded,
+            .watched = details->monitor != NULL,
+        };
+
+        g_array_append_val (infos, info);
+    }
+
+    g_array_sort (infos, debug_info_compare);
+
+    return infos;
+}

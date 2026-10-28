@@ -14,6 +14,7 @@
 
 #include "nautilus-inspector-page.h"
 
+#include "nautilus-directory.h"
 #include "nautilus-files-view.h"
 #include "nautilus-image.h"
 #include "nautilus-inspector-stats.h"
@@ -24,6 +25,7 @@
 #include <gtk/gtk.h>
 
 #define REFRESH_INTERVAL_MS 250
+#define DIRECTORY_LIST_INTERVAL_US G_USEC_PER_SEC
 
 typedef struct
 {
@@ -60,6 +62,18 @@ struct _NautilusInspectorPage
     GtkLabel *time_to_thumbnail_label;
 
     /* App-wide */
+
+    GtkLabel *directories_label;
+    GtkLabel *fully_loaded_label;
+    GtkLabel *files_label;
+    GtkLabel *watched_label;
+    GtkLabel *monitors_label;
+    GtkLabel *files_queued_label;
+    GtkLabel *async_jobs_label;
+    GtkLabel *waiting_for_job_label;
+    AdwExpanderRow *directory_list_row;
+    GPtrArray *directory_rows;
+    gint64 directory_list_time;
 
     GtkLabel *thumbnails_queued_label;
     GtkLabel *thumbnails_running_label;
@@ -345,11 +359,64 @@ clear_view_stats (NautilusInspectorPage *self)
 }
 
 static void
+update_directory_list (NautilusInspectorPage *self)
+{
+    g_autoptr (GArray) infos = nautilus_directory_get_debug_infos ();
+
+    for (guint i = 0; i < self->directory_rows->len; i++)
+    {
+        adw_expander_row_remove (self->directory_list_row, self->directory_rows->pdata[i]);
+    }
+    g_ptr_array_set_size (self->directory_rows, 0);
+
+    for (guint i = 0; i < infos->len; i++)
+    {
+        NautilusDirectoryDebugInfo *info = &g_array_index (infos, NautilusDirectoryDebugInfo, i);
+        GtkWidget *row = adw_action_row_new ();
+        g_autofree char *subtitle = g_strdup_printf ("%u files · %u monitor requests · %u refs%s%s",
+                                                     info->n_files, info->n_monitors, info->ref_count,
+                                                     info->fully_loaded ? " · listed" : "",
+                                                     info->watched ? " · watched" : "");
+
+        adw_preferences_row_set_use_markup (ADW_PREFERENCES_ROW (row), FALSE);
+        adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row), info->uri);
+        adw_action_row_set_title_lines (ADW_ACTION_ROW (row), 1);
+        adw_action_row_set_subtitle (ADW_ACTION_ROW (row), subtitle);
+        adw_expander_row_add_row (self->directory_list_row, row);
+        g_ptr_array_add (self->directory_rows, row);
+    }
+}
+
+static void
 update_app_stats (NautilusInspectorPage *self)
 {
     const NautilusInspectorStats *stats = &nautilus_inspector_stats;
+    NautilusDirectoryCacheStats cache;
+    g_autofree char *async_jobs = NULL;
+    g_autofree char *directory_count = NULL;
     g_autofree char *cache_size = NULL;
     guint n_queued, n_running, n_cached, max_cached;
+    gint64 now = g_get_monotonic_time ();
+
+    nautilus_directory_get_cache_stats (&cache);
+    set_label_uint (self->directories_label, cache.n_directories);
+    set_label_uint (self->fully_loaded_label, cache.n_fully_loaded);
+    set_label_uint (self->files_label, cache.n_files);
+    set_label_uint (self->watched_label, cache.n_watched);
+    set_label_uint (self->monitors_label, cache.n_monitors);
+    set_label_uint (self->files_queued_label, cache.n_files_queued);
+    async_jobs = g_strdup_printf ("%u / %u", cache.n_async_jobs, cache.n_async_jobs_max);
+    gtk_label_set_label (self->async_jobs_label, async_jobs);
+    set_label_uint (self->waiting_for_job_label, cache.n_waiting_for_job);
+
+    directory_count = g_strdup_printf ("%u directories", cache.n_directories);
+    adw_expander_row_set_subtitle (self->directory_list_row, directory_count);
+    if (adw_expander_row_get_expanded (self->directory_list_row) &&
+        now - self->directory_list_time >= DIRECTORY_LIST_INTERVAL_US)
+    {
+        update_directory_list (self);
+        self->directory_list_time = now;
+    }
 
     nautilus_thumbnail_get_queue_state (&n_queued, &n_running);
     set_label_uint (self->thumbnails_queued_label, n_queued);
@@ -431,6 +498,21 @@ build_app_page (NautilusInspectorPage *self,
                 AdwPreferencesPage    *page)
 {
     AdwPreferencesGroup *group;
+
+    group = add_group (page, "Directories", "All directories in memory, shared by all windows");
+    self->directories_label = add_row (group, "Directories");
+    self->fully_loaded_label = add_row (group, "Fully Listed");
+    self->files_label = add_row (group, "Files");
+    self->watched_label = add_row (group, "Watched for Changes");
+    set_row_subtitle (self->watched_label, "Directories with a file system monitor");
+    self->monitors_label = add_row (group, "Monitor Requests");
+    set_row_subtitle (self->monitors_label, "Views and other parts asking for live updates");
+    self->files_queued_label = add_row (group, "Files Queued for I/O");
+    self->async_jobs_label = add_row (group, "I/O Jobs Running");
+    self->waiting_for_job_label = add_row (group, "Directories Waiting for a Job");
+    self->directory_list_row = ADW_EXPANDER_ROW (adw_expander_row_new ());
+    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (self->directory_list_row), "All Directories");
+    adw_preferences_group_add (group, GTK_WIDGET (self->directory_list_row));
 
     group = add_group (page, "Thumbnailer",
                        "Shared by all views, which share its results. Totals are while the inspector is shown.");
@@ -562,11 +644,23 @@ nautilus_inspector_page_dispose (GObject *object)
 }
 
 static void
+nautilus_inspector_page_finalize (GObject *object)
+{
+    NautilusInspectorPage *self = NAUTILUS_INSPECTOR_PAGE (object);
+
+    g_clear_pointer (&self->directory_rows, g_ptr_array_unref);
+
+    G_OBJECT_CLASS (nautilus_inspector_page_parent_class)->finalize (object);
+}
+
+static void
 nautilus_inspector_page_init (NautilusInspectorPage *self)
 {
     GtkWidget *box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
     AdwViewStack *stack = ADW_VIEW_STACK (adw_view_stack_new ());
     GtkWidget *switcher = adw_view_switcher_new ();
+
+    self->directory_rows = g_ptr_array_new ();
 
     build_view_page (self, add_page (stack, "view", "View", "folder-symbolic"));
     build_app_page (self, add_page (stack, "app", "App-wide", "view-grid-symbolic"));
@@ -592,6 +686,7 @@ nautilus_inspector_page_class_init (NautilusInspectorPageClass *klass)
     object_class->get_property = nautilus_inspector_page_get_property;
     object_class->set_property = nautilus_inspector_page_set_property;
     object_class->dispose = nautilus_inspector_page_dispose;
+    object_class->finalize = nautilus_inspector_page_finalize;
 
     widget_class->map = nautilus_inspector_page_map;
     widget_class->unmap = nautilus_inspector_page_unmap;
