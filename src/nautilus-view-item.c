@@ -16,6 +16,7 @@ struct _NautilusViewItem
     gboolean loading;
     NautilusFile *file;
     GtkWidget *item_ui;
+    gboolean monitoring_file;
 };
 
 G_DEFINE_FINAL_TYPE (NautilusViewItem, nautilus_view_item, G_TYPE_OBJECT)
@@ -41,10 +42,33 @@ enum
 static guint signals[LAST_SIGNAL];
 
 static void
+set_monitoring_file (NautilusViewItem *self,
+                     gboolean          monitoring_file)
+{
+    if (self->monitoring_file == monitoring_file)
+    {
+        return;
+    }
+
+    self->monitoring_file = monitoring_file;
+
+    /* Only sniff the content type of files that are shown, to get the right icon */
+    if (monitoring_file)
+    {
+        nautilus_file_monitor_add (self->file, self, NAUTILUS_ATTRIBUTE_CONTENT_TYPE);
+    }
+    else
+    {
+        nautilus_file_monitor_remove (self->file, self);
+    }
+}
+
+static void
 nautilus_view_item_dispose (GObject *object)
 {
     NautilusViewItem *self = NAUTILUS_VIEW_ITEM (object);
 
+    set_monitoring_file (self, FALSE);
     g_clear_weak_pointer (&self->item_ui);
 
     G_OBJECT_CLASS (nautilus_view_item_parent_class)->dispose (object);
@@ -263,6 +287,7 @@ nautilus_view_item_set_item_ui (NautilusViewItem *self,
     g_return_if_fail (NAUTILUS_IS_VIEW_ITEM (self));
 
     g_set_weak_pointer (&self->item_ui, item_ui);
+    set_monitoring_file (self, item_ui != NULL);
 }
 
 void
