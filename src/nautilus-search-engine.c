@@ -12,6 +12,7 @@
 #include <config.h>
 #include "nautilus-search-engine.h"
 
+#include "nautilus-inspector-stats.h"
 #include "nautilus-query.h"
 #include "nautilus-search-engine-model.h"
 #include "nautilus-search-engine-localsearch.h"
@@ -40,6 +41,8 @@ struct _NautilusSearchEngine
     gboolean running;
     gboolean starting;
     gboolean restart;
+
+    NautilusSearchStats *stats; /* NULL without the inspector page. */
 };
 
 enum
@@ -75,6 +78,7 @@ search_engine_start_provider (NautilusSearchProvider *provider,
     else if (nautilus_search_provider_start (provider, self->query))
     {
         self->providers_started++;
+        nautilus_inspector_stats_record_search_provider_start (self->stats, provider);
     }
 }
 
@@ -85,6 +89,9 @@ search_engine_start_real (NautilusSearchEngine *self)
 
     self->providers_started = 0;
     self->providers_finished = 0;
+
+    g_autofree char *text = nautilus_query_get_text (self->query);
+    nautilus_inspector_stats_record_search_start (self->stats, text);
 
     self->starting = TRUE;
     search_engine_start_provider (self->localsearch, self);
@@ -155,6 +162,8 @@ search_provider_hits_added (NautilusSearchProvider *provider,
 {
     g_autoptr (GPtrArray) hits = transferred_hits;
 
+    nautilus_inspector_stats_record_search_hits (self->stats, provider, hits->len);
+
     if (!self->running || self->restart)
     {
         g_debug ("Ignoring hits-added, since engine is %s",
@@ -199,6 +208,7 @@ check_providers_status (NautilusSearchEngine *self)
     {
         g_debug ("Search engine finished");
 
+        nautilus_inspector_stats_record_search_end (self->stats);
         g_signal_emit (self, signals[SEARCH_FINISHED], 0);
     }
 
@@ -220,8 +230,11 @@ check_providers_status (NautilusSearchEngine *self)
 }
 
 static void
-search_provider_finished (NautilusSearchEngine *self)
+search_provider_finished (NautilusSearchProvider *provider,
+                          NautilusSearchEngine   *self)
 {
+    nautilus_inspector_stats_record_search_provider_end (self->stats, provider);
+
     self->providers_finished++;
 
     check_providers_status (self);
@@ -244,9 +257,9 @@ setup_provider (NautilusSearchEngine    *self,
             g_signal_connect (*provider_pointer, "hits-added",
                               G_CALLBACK (search_provider_hits_added),
                               self);
-            g_signal_connect_swapped (*provider_pointer, "provider-finished",
-                                      G_CALLBACK (search_provider_finished),
-                                      self);
+            g_signal_connect (*provider_pointer, "provider-finished",
+                              G_CALLBACK (search_provider_finished),
+                              self);
         }
     }
     else
@@ -282,6 +295,7 @@ nautilus_search_engine_finalize (GObject *object)
     NautilusSearchEngine *self = NAUTILUS_SEARCH_ENGINE (object);
 
     g_hash_table_destroy (self->uris);
+    g_clear_pointer (&self->stats, nautilus_inspector_stats_search_unref);
 
     g_clear_object (&self->localsearch);
     g_clear_object (&self->recent);
@@ -402,6 +416,13 @@ static void
 nautilus_search_engine_init (NautilusSearchEngine *self)
 {
     self->uris = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+    self->stats = nautilus_inspector_stats_search_new ();
+}
+
+NautilusSearchStats *
+nautilus_search_engine_get_stats (NautilusSearchEngine *self)
+{
+    return self->stats;
 }
 
 NautilusSearchEngine *

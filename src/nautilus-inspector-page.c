@@ -18,6 +18,7 @@
 #include "nautilus-files-view.h"
 #include "nautilus-image.h"
 #include "nautilus-inspector-stats.h"
+#include "nautilus-search-directory.h"
 #include "nautilus-thumbnails.h"
 #include "nautilus-window.h"
 #include "nautilus-window-slot.h"
@@ -28,6 +29,19 @@
 #define REFRESH_INTERVAL_MS 250
 #define RATE_INTERVAL_US G_USEC_PER_SEC
 #define DIRECTORY_LIST_INTERVAL_US G_USEC_PER_SEC
+
+/* Search providers as named by their type, without the "NautilusSearchEngine" prefix. */
+static const struct
+{
+    const char *type_suffix;
+    const char *title;
+} search_engines[] =
+{
+    { "Localsearch", "Indexer (LocalSearch)" },
+    { "Model", "Current View" },
+    { "Recent", "Recent Files" },
+    { "Simple", "Folder Crawl" },
+};
 
 enum
 {
@@ -45,6 +59,13 @@ typedef struct
     guint sources[NAUTILUS_IMAGE_N_SOURCES];
     NautilusTimingStats load_times;
 } OnScreenIcons;
+
+typedef struct
+{
+    AdwPreferencesGroup *group;
+    GtkLabel *total_label;
+    GtkLabel *engine_labels[G_N_ELEMENTS (search_engines)];
+} SearchWidgets;
 
 struct _NautilusInspectorPage
 {
@@ -69,11 +90,14 @@ struct _NautilusInspectorPage
     GtkLabel *sort_label;
     GtkLabel *splice_label;
 
+    SearchWidgets view_search;
+
     GtkLabel *status_labels[NAUTILUS_IMAGE_STATUS_FALLBACK + 1];
     GtkLabel *source_labels[NAUTILUS_IMAGE_N_SOURCES];
     GtkLabel *time_to_thumbnail_label;
 
     /* App-wide */
+    SearchWidgets shell_search;
 
     GtkLabel *rate_labels[N_RATES];
     guint64 rate_previous_counts[N_RATES];
@@ -379,6 +403,105 @@ clear_view_stats (NautilusInspectorPage *self)
 }
 
 static void
+update_search_stats (SearchWidgets             *widgets,
+                     const NautilusSearchStats *search,
+                     const char                *no_search_description)
+{
+    if (search == NULL || search->start_time == 0)
+    {
+        adw_preferences_group_set_description (widgets->group,
+                                               search == NULL ? no_search_description :
+                                                                "Not timed, the inspector was hidden when it started");
+        gtk_label_set_label (widgets->total_label, "—");
+        for (guint i = 0; i < G_N_ELEMENTS (search_engines); i++)
+        {
+            gtk_label_set_label (widgets->engine_labels[i], "—");
+        }
+
+        return;
+    }
+
+    g_autofree char *description = g_strdup_printf ("“%s”%s", search->text,
+                                                    search->end_time == 0 ? ", running" : "");
+    adw_preferences_group_set_description (widgets->group, description);
+    set_label_duration (widgets->total_label, search->start_time, search->end_time, TRUE);
+
+    for (guint i = 0; i < G_N_ELEMENTS (search_engines); i++)
+    {
+        const NautilusSearchProviderStats *provider = NULL;
+
+        for (guint j = 0; j < search->n_providers; j++)
+        {
+            if (g_str_has_suffix (search->providers[j].name, search_engines[i].type_suffix))
+            {
+                provider = &search->providers[j];
+            }
+        }
+
+        if (provider == NULL)
+        {
+            gtk_label_set_label (widgets->engine_labels[i], "not used");
+            continue;
+        }
+
+        g_autofree char *first_hit = provider->first_hit_time != 0 ?
+                                     g_strdup_printf ("%.1f ms", (provider->first_hit_time - search->start_time) / 1000.0) :
+                                     g_strdup ("—");
+        g_autofree char *done = provider->end_time != 0 ?
+                                g_strdup_printf ("%.1f ms", (provider->end_time - search->start_time) / 1000.0) :
+                                g_strdup ("running");
+        g_autofree char *text = g_strdup_printf ("%u hits · first %s · done %s",
+                                                 provider->n_hits, first_hit, done);
+
+        gtk_label_set_label (widgets->engine_labels[i], text);
+    }
+}
+
+static void
+update_view_search_stats (NautilusInspectorPage *self,
+                          NautilusFilesView     *view)
+{
+    g_autoptr (NautilusDirectory) directory = NULL;
+    NautilusSearchEngine *engine = NULL;
+
+    if (view != NULL && nautilus_files_view_is_searching (view))
+    {
+        directory = nautilus_directory_get (nautilus_files_view_get_location (view));
+        if (NAUTILUS_IS_SEARCH_DIRECTORY (directory))
+        {
+            engine = nautilus_search_directory_get_engine (NAUTILUS_SEARCH_DIRECTORY (directory));
+        }
+    }
+
+    update_search_stats (&self->view_search,
+                         engine != NULL ? nautilus_search_engine_get_stats (engine) : NULL,
+                         "This view is not searching");
+}
+
+static void
+update_shell_search_stats (NautilusInspectorPage *self)
+{
+    update_search_stats (&self->shell_search,
+                         nautilus_inspector_stats_get_shell_search (),
+                         "No search from GNOME Shell since startup");
+}
+
+static SearchWidgets
+add_search_group (AdwPreferencesPage *page,
+                  const char         *title)
+{
+    SearchWidgets widgets = { .group = add_group (page, title, NULL) };
+
+    widgets.total_label = add_row (widgets.group, "Total");
+    for (guint i = 0; i < G_N_ELEMENTS (search_engines); i++)
+    {
+        widgets.engine_labels[i] = add_row (widgets.group, search_engines[i].title);
+    }
+
+    return widgets;
+}
+
+static void
 update_rates (NautilusInspectorPage *self)
 {
     const NautilusInspectorStats *stats = &nautilus_inspector_stats;
@@ -458,6 +581,7 @@ update_app_stats (NautilusInspectorPage *self)
     guint n_queued, n_running, n_cached, max_cached;
     gint64 now = g_get_monotonic_time ();
 
+    update_shell_search_stats (self);
     update_rates (self);
 
     nautilus_directory_get_cache_stats (&cache);
@@ -510,6 +634,7 @@ refresh (gpointer user_data)
     {
         clear_view_stats (self);
     }
+    update_view_search_stats (self, view);
 
     update_app_stats (self);
 
@@ -539,6 +664,8 @@ build_view_page (NautilusInspectorPage *self,
     self->splice_label = add_row (group, "Splicing Into Model");
     set_row_subtitle (self->splice_label, "Includes re-sorting the view and updating the widgets");
 
+    self->view_search = add_search_group (page, "Search");
+
     group = add_group (page, "Icons on Screen", "Visible icons in this view, by state");
     self->status_labels[NAUTILUS_IMAGE_STATUS_THUMBNAIL] = add_row (group, "Thumbnail Shown");
     self->status_labels[NAUTILUS_IMAGE_STATUS_LOADING_ATTRIBUTES] = add_row (group, "Querying File Info");
@@ -562,6 +689,8 @@ build_app_page (NautilusInspectorPage *self,
                 AdwPreferencesPage    *page)
 {
     AdwPreferencesGroup *group;
+
+    self->shell_search = add_search_group (page, "Last GNOME Shell Search");
 
     group = add_group (page, "File Changes",
                        "Files reported as changed on disk or by Files itself, while the inspector is shown");

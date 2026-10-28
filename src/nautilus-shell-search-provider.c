@@ -431,6 +431,7 @@ execute_search (NautilusShellSearchProvider  *self,
 
     /* start searching */
     g_debug ("*** Search engine search started");
+    nautilus_inspector_stats_set_shell_search (nautilus_search_engine_get_stats (pending_search->engine));
     nautilus_search_engine_start (pending_search->engine, query);
 }
 

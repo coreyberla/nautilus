@@ -26,6 +26,29 @@ typedef struct
     gint64 max_time;
 } NautilusTimingStats;
 
+#define NAUTILUS_SEARCH_MAX_PROVIDERS 4
+
+typedef struct
+{
+    gconstpointer provider;
+    const char *name;
+    gint64 first_hit_time;
+    gint64 end_time;
+    guint n_hits;
+} NautilusSearchProviderStats;
+
+/* One per search engine, so concurrent searches are kept apart. Reference
+ * counted, so the last GNOME Shell search can outlive its engine. Timestamps
+ * are from g_get_monotonic_time(), or 0 if not reached yet. */
+typedef struct
+{
+    char *text;
+    gint64 start_time;
+    gint64 end_time;
+    guint n_providers;
+    NautilusSearchProviderStats providers[NAUTILUS_SEARCH_MAX_PROVIDERS];
+} NautilusSearchStats;
+
 typedef struct
 {
     /* nautilus_directory_notify_files_*() */
@@ -68,12 +91,76 @@ void nautilus_inspector_stats_set_shown (gboolean shown);
 void nautilus_inspector_stats_add_timing (NautilusTimingStats *timing,
                                           gint64               duration);
 
+void nautilus_inspector_stats_record_search_start (NautilusSearchStats *search,
+                                                   const char          *text);
+void nautilus_inspector_stats_record_search_provider_start (NautilusSearchStats *search,
+                                                            gconstpointer        provider);
+void nautilus_inspector_stats_record_search_hits (NautilusSearchStats *search,
+                                                  gconstpointer        provider,
+                                                  guint                n_hits);
+void nautilus_inspector_stats_record_search_provider_end (NautilusSearchStats *search,
+                                                          gconstpointer        provider);
+void nautilus_inspector_stats_record_search_end (NautilusSearchStats *search);
+
+NautilusSearchStats *nautilus_inspector_stats_search_new (void);
+void nautilus_inspector_stats_search_unref (NautilusSearchStats *search);
+
+/* The most recent GNOME Shell search, or NULL. */
+void nautilus_inspector_stats_set_shell_search (NautilusSearchStats *search);
+const NautilusSearchStats *nautilus_inspector_stats_get_shell_search (void);
+
 #else
 
 #define NAUTILUS_INSPECTOR_STATS_ENABLED() FALSE
 /* The arguments are still type-checked, but never evaluated. */
 #define NAUTILUS_INSPECTOR_STATS_ADD(field, n) G_STMT_START { if (0) { (void) (n); } } G_STMT_END
 #define NAUTILUS_INSPECTOR_STATS_ADD_TIMING(field, duration) G_STMT_START { if (0) { (void) (duration); } } G_STMT_END
+
+static inline void
+nautilus_inspector_stats_record_search_start (NautilusSearchStats *search,
+                                              const char          *text)
+{
+}
+
+static inline void
+nautilus_inspector_stats_record_search_provider_start (NautilusSearchStats *search,
+                                                       gconstpointer        provider)
+{
+}
+
+static inline void
+nautilus_inspector_stats_record_search_hits (NautilusSearchStats *search,
+                                             gconstpointer        provider,
+                                             guint                n_hits)
+{
+}
+
+static inline void
+nautilus_inspector_stats_record_search_provider_end (NautilusSearchStats *search,
+                                                     gconstpointer        provider)
+{
+}
+
+static inline void
+nautilus_inspector_stats_record_search_end (NautilusSearchStats *search)
+{
+}
+
+static inline NautilusSearchStats *
+nautilus_inspector_stats_search_new (void)
+{
+    return NULL;
+}
+
+static inline void
+nautilus_inspector_stats_search_unref (NautilusSearchStats *search)
+{
+}
+
+static inline void
+nautilus_inspector_stats_set_shell_search (NautilusSearchStats *search)
+{
+}
 
 #endif
 

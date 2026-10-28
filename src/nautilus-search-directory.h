@@ -10,6 +10,7 @@
 #pragma once
 
 #include "nautilus-directory.h"
+#include "nautilus-search-engine.h"
 
 #include "nautilus-types.h"
 
@@ -25,5 +26,6 @@ GFile *
 nautilus_search_directory_get_search_location (NautilusSearchDirectory *self);
 
 NautilusQuery *nautilus_search_directory_get_query       (NautilusSearchDirectory *self);
+NautilusSearchEngine *nautilus_search_directory_get_engine (NautilusSearchDirectory *self);
 void           nautilus_search_directory_set_query       (NautilusSearchDirectory *self,
 							  NautilusQuery           *query);

@@ -905,6 +905,12 @@ nautilus_search_directory_set_query (NautilusSearchDirectory *self,
     }
 }
 
+NautilusSearchEngine *
+nautilus_search_directory_get_engine (NautilusSearchDirectory *self)
+{
+    return self->engine;
+}
+
 NautilusQuery *
 nautilus_search_directory_get_query (NautilusSearchDirectory *self)
 {

@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include "nautilus-inspector-stats.h"
 #include "nautilus-types.h"
 
 #include <glib-object.h>
@@ -48,5 +49,9 @@ nautilus_search_engine_start (NautilusSearchEngine *self,
                               NautilusQuery        *query);
 void
 nautilus_search_engine_stop (NautilusSearchEngine *self);
+
+/* For debugging, see nautilus-inspector-stats.h. */
+NautilusSearchStats *
+nautilus_search_engine_get_stats (NautilusSearchEngine *self);
 
 G_END_DECLS
