@@ -1521,7 +1521,7 @@ begin_location_change (NautilusWindowSlot *self,
 
     /* Get the info needed to make decisions about how to open the new location */
     nautilus_file_call_when_ready (self->pending_file,
-                                   NAUTILUS_ATTRIBUTE_INFO |
+                                   NAUTILUS_ATTRIBUTE_CONTENT_TYPE |
                                    NAUTILUS_ATTRIBUTE_MOUNT,
                                    got_file_info_for_view_selection_callback,
                                    self);
@@ -1686,7 +1686,7 @@ mount_not_mounted_callback (GObject      *source_object,
     {
         nautilus_file_invalidate_all_attributes (self->pending_file);
         nautilus_file_call_when_ready (self->pending_file,
-                                       NAUTILUS_ATTRIBUTE_INFO |
+                                       NAUTILUS_ATTRIBUTE_CONTENT_TYPE |
                                        NAUTILUS_ATTRIBUTE_MOUNT,
                                        got_file_info_for_view_selection_callback,
                                        self);

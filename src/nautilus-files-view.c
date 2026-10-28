@@ -1509,6 +1509,45 @@ choose_program (NautilusFilesView *view,
                              view, G_CONNECT_DEFAULT);
 }
 
+typedef struct
+{
+    GWeakRef view;
+    GList *files;
+} ChooseProgramData;
+
+static void
+choose_program_files_ready (GList    *file_list,
+                            gpointer  user_data)
+{
+    ChooseProgramData *data = user_data;
+    g_autoptr (NautilusFilesView) view = g_weak_ref_get (&data->view);
+
+    if (view != NULL)
+    {
+        choose_program (view, g_steal_pointer (&data->files));
+    }
+
+    nautilus_file_list_free (data->files);
+    g_weak_ref_clear (&data->view);
+    g_free (data);
+}
+
+/* The app chooser lists apps for the content type */
+static void
+choose_program_when_ready (NautilusFilesView *view,
+                           GList             *files)
+{
+    ChooseProgramData *data = g_new0 (ChooseProgramData, 1);
+
+    g_weak_ref_init (&data->view, view);
+    data->files = files;
+    nautilus_file_list_call_when_ready (files,
+                                        NAUTILUS_ATTRIBUTE_CONTENT_TYPE,
+                                        NULL,
+                                        choose_program_files_ready,
+                                        data);
+}
+
 static void
 action_open_with_other_application (GSimpleAction *action,
                                     GVariant      *state,
@@ -1519,7 +1558,7 @@ action_open_with_other_application (GSimpleAction *action,
     NautilusFilesView *self = user_data;
     g_autolist (NautilusFile) selection = nautilus_files_view_get_selection (self);
 
-    choose_program (self, g_steal_pointer (&selection));
+    choose_program_when_ready (self, g_steal_pointer (&selection));
 }
 
 static void
@@ -1536,7 +1575,7 @@ action_open_current_directory_with_other_application (GSimpleAction *action,
     if (self->directory_as_file != NULL)
     {
         files = g_list_append (NULL, nautilus_file_ref (self->directory_as_file));
-        choose_program (self, files);
+        choose_program_when_ready (self, files);
     }
 }
 

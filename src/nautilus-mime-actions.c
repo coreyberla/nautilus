@@ -496,7 +496,7 @@ nautilus_mime_actions_check_if_required_attributes_ready (NautilusFile *file)
 NautilusAttributes
 nautilus_mime_actions_get_required_attributes (void)
 {
-    return NAUTILUS_ATTRIBUTE_INFO;
+    return NAUTILUS_ATTRIBUTE_CONTENT_TYPE;
 }
 
 GAppInfo *

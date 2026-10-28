@@ -3755,7 +3755,7 @@ properties_widget_new (NautilusFileList *files,
     self->files = g_list_reverse (self->files);
 
     nautilus_file_list_call_when_ready (self->files,
-                                        NAUTILUS_ATTRIBUTE_INFO |
+                                        NAUTILUS_ATTRIBUTE_CONTENT_TYPE |
                                         NAUTILUS_ATTRIBUTE_THUMBNAIL_BUFFER,
                                         &self->handle,
                                         file_list_ready_callback,
