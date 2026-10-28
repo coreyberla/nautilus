@@ -139,6 +139,10 @@ struct _NautilusInspectorPage
     /* Extensions */
     AdwPreferencesPage *extensions_page;
     GArray *extension_widgets;
+
+    AdwViewStack *stack;
+    GtkButton *copy_button;
+    guint copy_feedback_id;
 };
 
 enum
@@ -825,6 +829,147 @@ build_extensions_page (NautilusInspectorPage *self)
     }
 }
 
+static GtkLabel *
+find_value_label (GtkWidget *widget)
+{
+    for (GtkWidget *child = gtk_widget_get_first_child (widget);
+         child != NULL;
+         child = gtk_widget_get_next_sibling (child))
+    {
+        GtkLabel *label;
+
+        if (GTK_IS_LABEL (child) && gtk_widget_has_css_class (child, "monospace"))
+        {
+            return GTK_LABEL (child);
+        }
+
+        label = find_value_label (child);
+        if (label != NULL)
+        {
+            return label;
+        }
+    }
+
+    return NULL;
+}
+
+/* Rows added to an expander row are in its revealer, unlike its header. */
+static gboolean
+is_expander_row_child (GtkWidget *row)
+{
+    GtkWidget *expander_row = gtk_widget_get_ancestor (row, ADW_TYPE_EXPANDER_ROW);
+    GtkWidget *revealer = gtk_widget_get_ancestor (row, GTK_TYPE_REVEALER);
+
+    return expander_row != NULL && revealer != NULL && gtk_widget_is_ancestor (revealer, expander_row);
+}
+
+/* Appends the groups and rows under widget as Markdown. */
+static void
+append_widget_text (GString   *text,
+                    GtkWidget *widget,
+                    guint      depth)
+{
+    if (ADW_IS_PREFERENCES_GROUP (widget))
+    {
+        AdwPreferencesGroup *group = ADW_PREFERENCES_GROUP (widget);
+        const char *description = adw_preferences_group_get_description (group);
+
+        g_string_append_printf (text, "\n### %s\n", adw_preferences_group_get_title (group));
+        if (description != NULL && *description != '\0')
+        {
+            g_string_append_printf (text, "_%s_\n", description);
+        }
+        g_string_append_c (text, '\n');
+    }
+    else if (depth > 0 && ADW_IS_ACTION_ROW (widget) && !is_expander_row_child (widget))
+    {
+        /* The header of the expander row, already appended. */
+        return;
+    }
+    else if (ADW_IS_EXPANDER_ROW (widget) || ADW_IS_ACTION_ROW (widget))
+    {
+        const char *title = adw_preferences_row_get_title (ADW_PREFERENCES_ROW (widget));
+        const char *subtitle = ADW_IS_EXPANDER_ROW (widget) ?
+                               adw_expander_row_get_subtitle (ADW_EXPANDER_ROW (widget)) :
+                               adw_action_row_get_subtitle (ADW_ACTION_ROW (widget));
+        GtkLabel *value = ADW_IS_ACTION_ROW (widget) ? find_value_label (widget) : NULL;
+
+        g_string_append_printf (text, "%*s- %s", depth * 2, "", title);
+        if (value != NULL)
+        {
+            g_string_append_printf (text, ": `%s`", gtk_label_get_label (value));
+        }
+        if (subtitle != NULL && *subtitle != '\0')
+        {
+            g_string_append_printf (text, " (%s)", subtitle);
+        }
+        g_string_append_c (text, '\n');
+
+        if (ADW_IS_ACTION_ROW (widget))
+        {
+            return;
+        }
+
+        /* The rows of an expander row. */
+        depth += 1;
+    }
+
+    for (GtkWidget *child = gtk_widget_get_first_child (widget);
+         child != NULL;
+         child = gtk_widget_get_next_sibling (child))
+    {
+        append_widget_text (text, child, depth);
+    }
+}
+
+static char *
+get_stats_text (NautilusInspectorPage *self)
+{
+    g_autoptr (GString) text = g_string_new ("## Files Inspector Statistics\n\n");
+    g_autoptr (GListModel) pages = G_LIST_MODEL (adw_view_stack_get_pages (self->stack));
+
+    g_string_append_printf (text, "Files %s, GTK %u.%u.%u, libadwaita %u.%u.%u\n",
+                            VERSION,
+                            gtk_get_major_version (), gtk_get_minor_version (), gtk_get_micro_version (),
+                            adw_get_major_version (), adw_get_minor_version (), adw_get_micro_version ());
+
+    for (guint i = 0; i < g_list_model_get_n_items (pages); i++)
+    {
+        g_autoptr (AdwViewStackPage) page = g_list_model_get_item (pages, i);
+
+        g_string_append_printf (text, "\n## %s\n", adw_view_stack_page_get_title (page));
+        append_widget_text (text, adw_view_stack_page_get_child (page), 0);
+    }
+
+    return g_string_free_and_steal (g_steal_pointer (&text));
+}
+
+static void
+on_copy_feedback_timeout (gpointer user_data)
+{
+    NautilusInspectorPage *self = user_data;
+
+    self->copy_feedback_id = 0;
+    gtk_button_set_icon_name (self->copy_button, "edit-copy-symbolic");
+}
+
+static void
+on_copy_clicked (NautilusInspectorPage *self)
+{
+    g_autofree char *text = NULL;
+
+    /* Include current values, and the directory list even if collapsed. */
+    refresh (self);
+    update_directory_list (self);
+    text = get_stats_text (self);
+
+    gdk_clipboard_set_text (gtk_widget_get_clipboard (GTK_WIDGET (self)), text);
+
+    gtk_button_set_icon_name (self->copy_button, "object-select-symbolic");
+    g_clear_handle_id (&self->copy_feedback_id, g_source_remove);
+    self->copy_feedback_id = g_timeout_add_seconds_once (2, on_copy_feedback_timeout, self);
+}
+
 static void
 on_inspector_visible_changed (NautilusInspectorPage *self)
 {
@@ -938,6 +1083,7 @@ nautilus_inspector_page_dispose (GObject *object)
     NautilusInspectorPage *self = NAUTILUS_INSPECTOR_PAGE (object);
 
     g_clear_handle_id (&self->refresh_id, g_source_remove);
+    g_clear_handle_id (&self->copy_feedback_id, g_source_remove);
     g_clear_object (&self->object);
 
     G_OBJECT_CLASS (nautilus_inspector_page_parent_class)->dispose (object);
@@ -958,8 +1104,10 @@ static void
 nautilus_inspector_page_init (NautilusInspectorPage *self)
 {
     GtkWidget *box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+    GtkWidget *header = gtk_center_box_new ();
     AdwViewStack *stack = ADW_VIEW_STACK (adw_view_stack_new ());
     GtkWidget *switcher = adw_view_switcher_new ();
+    GtkWidget *copy_button = gtk_button_new_from_icon_name ("edit-copy-symbolic");
 
     self->directory_rows = g_ptr_array_new ();
     self->extension_widgets = g_array_new (FALSE, TRUE, sizeof (ExtensionWidgets));
@@ -969,14 +1117,24 @@ nautilus_inspector_page_init (NautilusInspectorPage *self)
     self->extensions_page = add_page (stack, "extensions", "Extensions", "application-x-addon-symbolic");
     build_extensions_page (self);
 
+    self->stack = stack;
     adw_view_switcher_set_stack (ADW_VIEW_SWITCHER (switcher), stack);
     adw_view_switcher_set_policy (ADW_VIEW_SWITCHER (switcher), ADW_VIEW_SWITCHER_POLICY_WIDE);
-    gtk_widget_set_halign (switcher, GTK_ALIGN_CENTER);
-    gtk_widget_set_margin_top (switcher, 6);
-    gtk_widget_set_margin_bottom (switcher, 6);
     gtk_widget_set_vexpand (GTK_WIDGET (stack), TRUE);
 
-    gtk_box_append (GTK_BOX (box), switcher);
+    self->copy_button = GTK_BUTTON (copy_button);
+    gtk_widget_set_tooltip_text (copy_button, "Copy All Statistics as Text");
+    gtk_widget_add_css_class (copy_button, "flat");
+    gtk_widget_set_valign (copy_button, GTK_ALIGN_CENTER);
+    g_signal_connect_swapped (copy_button, "clicked", G_CALLBACK (on_copy_clicked), self);
+
+    gtk_center_box_set_center_widget (GTK_CENTER_BOX (header), switcher);
+    gtk_center_box_set_end_widget (GTK_CENTER_BOX (header), copy_button);
+    gtk_widget_set_margin_top (header, 6);
+    gtk_widget_set_margin_bottom (header, 6);
+    gtk_widget_set_margin_end (header, 6);
+
+    gtk_box_append (GTK_BOX (box), header);
     gtk_box_append (GTK_BOX (box), GTK_WIDGET (stack));
     adw_bin_set_child (ADW_BIN (self), box);
 }

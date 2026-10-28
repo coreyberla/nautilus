@@ -43,7 +43,8 @@ inspector is then created before Files registers it.
 Statistics are only collected while the inspector is shown, so open it before
 loading the folder or starting the search you want to look at. The "View" tab
 follows the active tab of the most recently focused window, or the view
-containing the widget picked in the "Objects" tab.
+containing the widget picked in the "Objects" tab. The copy button puts all
+statistics on the clipboard as Markdown, to paste them in an issue.
 
 When `sysprof-capture-4` is available at build time, loading folders,
 searches, thumbnails, deep counts and extension calls also show up as marks in
