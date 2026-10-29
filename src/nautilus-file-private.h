@@ -20,7 +20,7 @@
 
 /* Same as NAUTILUS_FILE_DEFAULT_ATTRIBUTES, but without standard::content-type */
 #define NAUTILUS_FILE_LISTING_ATTRIBUTES				\
-	"standard::type,standard::is-hidden,standard::is-backup,standard::is-symlink,standard::is-virtual,standard::is-volatile,standard::name,standard::display-name,standard::edit-name,standard::copy-name,standard::description,standard::icon,standard::symbolic-icon,standard::fast-content-type,standard::size,standard::allocated-size,standard::symlink-target,standard::target-uri,standard::sort-order," NAUTILUS_FILE_NON_STANDARD_ATTRIBUTES
+	"standard::type,standard::is-hidden,standard::is-backup,standard::is-symlink,standard::is-virtual,standard::is-volatile,standard::name,standard::display-name,standard::edit-name,standard::copy-name,standard::description,standard::icon,standard::fast-content-type,standard::size,standard::allocated-size,standard::symlink-target,standard::target-uri,standard::sort-order," NAUTILUS_FILE_NON_STANDARD_ATTRIBUTES
 
 /* These are in the typical sort order. Known things come first, then
  * things where we can't know, finally things where we don't yet know.
