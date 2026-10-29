@@ -134,6 +134,17 @@ update_labels (NautilusNameCell *self)
 }
 
 static void
+update_labels_if_bound (NautilusNameCell *self)
+{
+    g_autoptr (NautilusViewItem) item = nautilus_view_cell_get_item (NAUTILUS_VIEW_CELL (self));
+
+    if (item != NULL)
+    {
+        update_labels (self);
+    }
+}
+
+static void
 update_icon (NautilusNameCell *self)
 {
     g_autoptr (NautilusViewItem) item = nautilus_view_cell_get_item (NAUTILUS_VIEW_CELL (self));
@@ -498,15 +509,28 @@ nautilus_name_cell_set_path (NautilusNameCell *self,
                              GQuark            path_attribute_q,
                              GFile            *base_location)
 {
+    if (self->path_attribute_q == path_attribute_q &&
+        self->file_path_base_location == base_location)
+    {
+        return;
+    }
+
     self->path_attribute_q = path_attribute_q;
     g_set_object (&self->file_path_base_location, base_location);
+    update_labels_if_bound (self);
 }
 
 void
 nautilus_name_cell_set_show_snippet (NautilusNameCell *self,
                                      gboolean          show)
 {
+    if (self->show_snippet == show)
+    {
+        return;
+    }
+
     self->show_snippet = show;
+    update_labels_if_bound (self);
 }
 
 GtkTreeExpander *
