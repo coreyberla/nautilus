@@ -29,7 +29,7 @@
 /* Local folders list quickly, so fetch more files at a time. Fewer round
  * trips through the main loop lets the main thread keep up with the
  * enumeration. */
-#define DIRECTORY_LOAD_NATIVE_ITEMS_PER_CALLBACK 500
+#define DIRECTORY_LOAD_NATIVE_ITEMS_PER_CALLBACK 300
 
 /* Keep async. jobs down to this number for all directories. */
 #define MAX_ASYNC_JOBS 10
