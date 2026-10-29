@@ -4538,7 +4538,21 @@ nautilus_file_should_show_thumbnail (NautilusFile *file)
         return TRUE;
     }
 
-    return get_speed_tradeoff_preference_for_file (file, show_file_thumbs);
+    if (!get_speed_tradeoff_preference_for_file (file, show_file_thumbs))
+    {
+        return FALSE;
+    }
+
+    if (file->details->thumbnail_path != NULL)
+    {
+        return TRUE;
+    }
+
+    /* Skip types without a thumbnailer and failed thumbnails, otherwise
+     * views query the file every time it is shown only to find that out. */
+    g_autofree char *uri = nautilus_file_get_uri (file);
+
+    return nautilus_can_thumbnail (uri, mime_type, nautilus_file_get_mtime (file));
 }
 
 static GList *
