@@ -673,6 +673,44 @@ nautilus_view_model_add_items (NautilusViewModel *self,
     }
 }
 
+/**
+ * nautilus_view_model_replace_all_items:
+ *
+ * Like nautilus_view_model_remove_all_items() followed by
+ * nautilus_view_model_add_items(), but in a single model change, so the view
+ * can reuse the widgets of the removed items for the added ones.
+ */
+void
+nautilus_view_model_replace_all_items (NautilusViewModel *self,
+                                       GList             *items)
+{
+    GListStore *store = G_LIST_STORE (gtk_filter_list_model_get_model (self->root_filter_model));
+    g_autoptr (GPtrArray) array = g_ptr_array_new ();
+    g_autoptr (GList) sorted_items = NULL;
+
+    g_hash_table_remove_all (self->map_files_to_model);
+    g_hash_table_remove_all (self->directory_reverse_map);
+
+    /* The first added file becomes the initial focus and scroll anchor, so we
+     * need to sort items before adding them to the internal model. With no
+     * subdirectories left, all of them go into the root store. */
+    sorted_items = g_list_sort_with_data (g_list_copy (items), compare_data_func, self);
+
+    for (GList *l = sorted_items; l != NULL; l = l->next)
+    {
+        NautilusViewItem *item = NAUTILUS_VIEW_ITEM (l->data);
+
+        g_ptr_array_add (array, item);
+        g_hash_table_insert (self->map_files_to_model,
+                             nautilus_view_item_get_file (item),
+                             item);
+    }
+
+    g_list_store_splice (store,
+                         0, g_list_model_get_n_items (G_LIST_MODEL (store)),
+                         array->pdata, array->len);
+}
+
 void
 nautilus_view_model_clear_subdirectory (NautilusViewModel *self,
                                         NautilusViewItem  *item)

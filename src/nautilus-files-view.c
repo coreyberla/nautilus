@@ -159,6 +159,9 @@ struct _NautilusFilesView
 
     guint transition_timeout_id;
     gboolean begin_loading_delayed;
+    /* The old contents are replaced by the next added files, instead of
+     * being removed first. This allows the list widgets to be reused. */
+    gboolean clear_pending;
 
     guint display_pending_source_id;
     guint changes_timeout_id;
@@ -4144,7 +4147,15 @@ nautilus_files_view_add_files (NautilusFilesView *self,
         self->in_progress_selection_source = self->selection_source;
     }
 
-    nautilus_view_model_add_items (self->model, items);
+    if (self->clear_pending)
+    {
+        self->clear_pending = FALSE;
+        nautilus_view_model_replace_all_items (self->model, items);
+    }
+    else
+    {
+        nautilus_view_model_add_items (self->model, items);
+    }
 
     self->in_progress_selection_source = tmp_source;
 }
@@ -4217,6 +4228,16 @@ files_view_file_changed (NautilusFilesView *self,
 }
 
 static void
+flush_pending_clear (NautilusFilesView *self)
+{
+    if (self->clear_pending)
+    {
+        self->clear_pending = FALSE;
+        nautilus_view_model_remove_all_items (self->model);
+    }
+}
+
+static void
 process_pending_files (NautilusFilesView *self)
 {
     g_autolist (FileAndDirectory) files_added = g_steal_pointer (&self->new_added_files);
@@ -4261,6 +4282,10 @@ process_pending_files (NautilusFilesView *self)
         g_signal_emit (self,
                        signals[ADD_FILES], 0, pending_additions);
     }
+
+    /* No files were added to replace the old contents, so remove them now,
+     * before handling changes, which would otherwise apply to old files. */
+    flush_pending_clear (self);
 
     for (GList *node = files_changed; node != NULL; node = node->next)
     {
@@ -4340,17 +4365,23 @@ files_view_has_focus (NautilusFilesView *self)
 static void
 display_pending_files (NautilusFilesView *view)
 {
+    /* If the old contents are still shown, let the pending files replace them
+     * in a single model change, rather than clearing the model and then adding
+     * the files. This way the list widgets get reused instead of recreated. */
+    view->clear_pending = view->transition_timeout_id != 0;
     transition_emit_delayed_signals_if_pending (view);
 
     /* Remember focus, so we can restore it if it gets lost. */
     gboolean view_had_focus = files_view_has_focus (view);
 
-    /* Get selection after delayed signals are emitted. */
+    /* Get selection after delayed signals are emitted. The old selection
+     * doesn't count if the old contents are about to be replaced. */
     g_autoptr (GtkBitset) selection = gtk_selection_model_get_selection (GTK_SELECTION_MODEL (view->model));
-    gboolean no_selection = gtk_bitset_is_empty (selection);
+    gboolean no_selection = view->clear_pending || gtk_bitset_is_empty (selection);
     guint old_cursor_pos = no_selection ? 0 : gtk_bitset_get_minimum (selection);
 
     process_pending_files (view);
+    flush_pending_clear (view);
 
     if ((no_selection || !selection_source_is_intentional (view->selection_source)) &&
         !view->pending_selection &&
@@ -8416,6 +8447,12 @@ view_directory_changed_callback (NautilusFile *file,
 static void
 files_view_clear (NautilusFilesView *self)
 {
+    if (self->clear_pending)
+    {
+        /* The old contents are replaced when adding the pending files. */
+        return;
+    }
+
     nautilus_view_model_remove_all_items (self->model);
 }
 
