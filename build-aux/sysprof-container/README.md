@@ -32,6 +32,43 @@ For the Fedora image, `--build-arg GNOME_FROM_GIT=1` rebuilds glib, gtk and
 libadwaita from git like `.gitlab/image-script.sh` does, for when rawhide lags
 behind what `meson.build` requires.
 
+## Claude Code cloud sessions
+
+In the cloud sandbox, Fedora hosts and gitlab.gnome.org are blocked, Docker
+Hub is rate-limited, and HTTPS goes through a proxy. This sequence works there:
+
+```sh
+# 1. Start Docker
+dockerd >/tmp/dockerd.log 2>&1 &
+
+# 2. Make the Ubuntu 26.10 base image without Docker Hub
+apt-get update && apt-get install -y debootstrap
+ln -sf gutsy /usr/share/debootstrap/scripts/tenacious
+debootstrap --variant=minbase --components=main,universe tenacious /tmp/rootfs \
+    http://archive.ubuntu.com/ubuntu
+tar -C /tmp/rootfs -c . | docker import - ubuntu:26.10
+
+# 3. Build the image (plain HTTP to the Ubuntu archive goes out directly)
+docker build --network host -f build-aux/sysprof-container/Containerfile.ubuntu \
+    -t nautilus-sysprof:ubuntu build-aux/sysprof-container
+
+# 4. Supply libgxdp from a release tarball
+curl -O http://archive.ubuntu.com/ubuntu/pool/main/n/nautilus/nautilus_51.0.1.orig.tar.xz
+tar xf nautilus_51.0.1.orig.tar.xz nautilus-51.0.1/subprojects/libgxdp
+cp -r nautilus-51.0.1/subprojects/libgxdp subprojects/
+
+# 5. Record, routing debuginfod through the proxy
+docker run --rm --privileged --network host -v "$PWD:/src" -e PROFILE_SECONDS=30 \
+    -e https_proxy="$HTTPS_PROXY" -e CURL_CA_BUNDLE=/ca.crt \
+    -v /root/.ccr/ca-bundle.crt:/ca.crt:ro \
+    nautilus-sysprof:ubuntu \
+    build-aux/sysprof-container/run-profile.sh /src/_profile/nautilus.syscap
+```
+
+If the tarball in step 4 is gone from the archive, use the current
+`nautilus_*.orig.tar.xz` from the same directory. Move `_profile/` out of the
+tree afterwards so it is not left untracked.
+
 ## Notes
 
 - The libgxdp subproject is fetched from gitlab.gnome.org on first build. If
