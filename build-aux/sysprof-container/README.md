@@ -47,6 +47,25 @@ recording for `PROFILE_SECONDS` (default 5). To look at just the load:
    two stamps from that line. `TID=<pid>` restricts it to the main thread,
    `HIST=10` shows what the main thread and the workers did over time.
 
+## Profiling scrolling
+
+`scroll-timing.patch` makes the view scroll itself when `NAUTILUS_AUTOSCROLL`
+is set to a speed in pixels per second. After `NAUTILUS_AUTOSCROLL_DELAY`
+seconds (default 10) it scrolls to the bottom and back up, for
+`NAUTILUS_AUTOSCROLL_PASSES` one-way passes (default 4). After each pass it
+logs an `AUTOSCROLL` line with the frame rate, the worst frame, the number of
+frames over 20 ms, and the pid and stamps for `syscap-window`.
+
+```sh
+git apply build-aux/sysprof-container/scroll-timing.patch
+docker run ... -v /path/to/big/folder:/bigdir:ro -e PROFILE_OPEN=/bigdir \
+    -e PROFILE_SECONDS=80 -e NAUTILUS_AUTOSCROLL=6000 -e NAUTILUS_AUTOSCROLL_PASSES=1 \
+    nautilus-sysprof:ubuntu build-aux/sysprof-container/run-profile.sh /src/_profile/scroll.syscap
+```
+
+Each pass takes the same time whatever the frame rate. Pick a speed and folder
+size that make it fit in `PROFILE_SECONDS`.
+
 `GSK_RENDERER=cairo` (via `-e`) avoids llvmpipe compiling shaders during the
 load, which otherwise dominates profiles in VMs without a GPU.
 

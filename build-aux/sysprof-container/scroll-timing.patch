@@ -1,0 +1,132 @@
+diff --git a/src/nautilus-list-base.c b/src/nautilus-list-base.c
+index ef2e266..19d6897 100644
+--- a/src/nautilus-list-base.c
++++ b/src/nautilus-list-base.c
+@@ -16,6 +16,9 @@
+ #include "nautilus-file.h"
+ #include "nautilus-global-preferences.h"
+ 
++#include <stdlib.h>
++#include <unistd.h>
++
+ #ifdef GDK_WINDOWING_X11
+ #include <gdk/x11/gdkx.h>
+ #endif
+@@ -1293,6 +1296,108 @@ nautilus_list_base_class_init (NautilusListBaseClass *klass)
+                                                           GTK_TYPE_WIDGET);
+ }
+ 
++/* Profiling aid: with NAUTILUS_AUTOSCROLL=px_per_second, scroll the view
++ * down to the bottom and back up NAUTILUS_AUTOSCROLL_PASSES times (default
++ * 4) once NAUTILUS_AUTOSCROLL_DELAY seconds (default 10) have passed, and log
++ * frame timings per pass with g_get_monotonic_time () stamps. */
++typedef struct
++{
++    double speed;
++    gint64 start_at;
++    gint64 pass_start;
++    gint64 last_frame;
++    gint64 worst_frame;
++    guint frames;
++    guint slow_frames;
++    guint pass;
++    guint n_passes;
++    double pos;
++} AutoScroll;
++
++static gboolean
++autoscroll_tick (GtkWidget     *widget,
++                 GdkFrameClock *clock,
++                 gpointer       user_data)
++{
++    AutoScroll *as = user_data;
++    GtkAdjustment *adj = gtk_scrolled_window_get_vadjustment (GTK_SCROLLED_WINDOW (widget));
++    gint64 now = g_get_monotonic_time ();
++    double max = gtk_adjustment_get_upper (adj) - gtk_adjustment_get_page_size (adj);
++    gboolean down = (as->pass % 2) == 0;
++
++    if (now < as->start_at || max <= 0)
++    {
++        return G_SOURCE_CONTINUE;
++    }
++
++    if (as->pass_start == 0)
++    {
++        as->pass_start = now;
++        as->last_frame = now;
++        as->pos = down ? 0 : max;
++        as->frames = as->slow_frames = 0;
++        as->worst_frame = 0;
++        gtk_adjustment_set_value (adj, as->pos);
++        return G_SOURCE_CONTINUE;
++    }
++
++    {
++        gint64 dt = now - as->last_frame;
++
++        as->frames++;
++        as->worst_frame = MAX (as->worst_frame, dt);
++        if (dt > 1000000 / 50)
++        {
++            as->slow_frames++;
++        }
++        as->last_frame = now;
++        as->pos += (down ? 1 : -1) * as->speed * dt / 1e6;
++    }
++
++    if ((down && as->pos >= max) || (!down && as->pos <= 0))
++    {
++        double secs = (now - as->pass_start) / 1e6;
++
++        gtk_adjustment_set_value (adj, down ? max : 0);
++        g_message ("AUTOSCROLL pass %u %s: %.0f px in %.2f s, %u frames, %.1f fps, "
++                   "worst frame %.1f ms, %u frames > 20 ms (pid %d, %" G_GINT64_FORMAT " -> %" G_GINT64_FORMAT ")",
++                   as->pass, down ? "down" : "up", max, secs, as->frames,
++                   as->frames / secs, as->worst_frame / 1000.0, as->slow_frames,
++                   getpid (), as->pass_start, now);
++        as->pass++;
++        as->pass_start = 0;
++        if (as->pass >= as->n_passes)
++        {
++            g_message ("AUTOSCROLL done");
++            return G_SOURCE_REMOVE;
++        }
++        return G_SOURCE_CONTINUE;
++    }
++
++    gtk_adjustment_set_value (adj, as->pos);
++    return G_SOURCE_CONTINUE;
++}
++
++static void
++autoscroll_setup (GtkWidget *scrolled_window)
++{
++    const char *speed = g_getenv ("NAUTILUS_AUTOSCROLL");
++    const char *delay = g_getenv ("NAUTILUS_AUTOSCROLL_DELAY");
++    const char *passes = g_getenv ("NAUTILUS_AUTOSCROLL_PASSES");
++    AutoScroll *as;
++
++    if (speed == NULL)
++    {
++        return;
++    }
++
++    as = g_new0 (AutoScroll, 1);
++    as->speed = g_ascii_strtod (speed, NULL);
++    as->n_passes = passes != NULL ? atoi (passes) : 4;
++    as->start_at = g_get_monotonic_time () + (delay != NULL ? atoi (delay) : 10) * G_USEC_PER_SEC;
++    gtk_widget_add_tick_callback (scrolled_window, autoscroll_tick, as, g_free);
++}
++
+ static void
+ nautilus_list_base_init (NautilusListBase *self)
+ {
+@@ -1315,6 +1420,8 @@ nautilus_list_base_init (NautilusListBase *self)
+                              G_CALLBACK (set_click_mode_from_settings), self,
+                              G_CONNECT_SWAPPED);
+     set_click_mode_from_settings (self);
++
++    autoscroll_setup (priv->scrolled_window);
+ }
+ 
+ NautilusFile *
