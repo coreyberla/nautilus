@@ -26,6 +26,10 @@
 #endif
 
 #define DIRECTORY_LOAD_ITEMS_PER_CALLBACK 100
+/* Local folders list quickly, so fetch more files at a time. Fewer round
+ * trips through the main loop lets the main thread keep up with the
+ * enumeration. */
+#define DIRECTORY_LOAD_NATIVE_ITEMS_PER_CALLBACK 500
 
 /* Keep async. jobs down to this number for all directories. */
 #define MAX_ASYNC_JOBS 10
@@ -1996,6 +2000,14 @@ directory_load_state_free (DirectoryLoadState *state)
     g_free (state);
 }
 
+static int
+get_directory_load_items_per_callback (NautilusDirectory *directory)
+{
+    return g_file_is_native (directory->details->location) ?
+           DIRECTORY_LOAD_NATIVE_ITEMS_PER_CALLBACK :
+           DIRECTORY_LOAD_ITEMS_PER_CALLBACK;
+}
+
 static void
 more_files_callback (GObject      *source_object,
                      GAsyncResult *res,
@@ -2040,7 +2052,7 @@ more_files_callback (GObject      *source_object,
     else
     {
         g_file_enumerator_next_files_async (state->enumerator,
-                                            DIRECTORY_LOAD_ITEMS_PER_CALLBACK,
+                                            get_directory_load_items_per_callback (directory),
                                             G_PRIORITY_DEFAULT,
                                             state->cancellable,
                                             more_files_callback,
@@ -2090,7 +2102,7 @@ enumerate_children_callback (GObject      *source_object,
     {
         state->enumerator = enumerator;
         g_file_enumerator_next_files_async (state->enumerator,
-                                            DIRECTORY_LOAD_ITEMS_PER_CALLBACK,
+                                            get_directory_load_items_per_callback (state->directory),
                                             G_PRIORITY_DEFAULT,
                                             state->cancellable,
                                             more_files_callback,
