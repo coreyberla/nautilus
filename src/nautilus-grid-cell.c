@@ -282,14 +282,6 @@ nautilus_grid_cell_dispose (GObject *object)
 #define EMBLEMS_BOX_WIDTH 18
 #define VERTICAL_PADDING 6
 
-/* Cells are measured at this width, and are only wider if their contents
- * unexpectedly don't fit. */
-int
-nautilus_grid_cell_get_width_for_icon_size (guint icon_size)
-{
-    return EMBLEMS_BOX_WIDTH + icon_size + EMBLEMS_BOX_WIDTH;
-}
-
 static void
 nautilus_grid_cell_measure (GtkWidget      *widget,
                             GtkOrientation  orientation,

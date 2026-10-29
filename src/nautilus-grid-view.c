@@ -34,8 +34,6 @@ struct _NautilusGridView
 
 G_DEFINE_FINAL_TYPE (NautilusGridView, nautilus_grid_view, NAUTILUS_TYPE_LIST_BASE)
 
-#define MAX_COLUMNS 20
-
 #define get_view_item(li) \
         (NAUTILUS_VIEW_ITEM (gtk_tree_list_row_get_item (GTK_TREE_LIST_ROW (gtk_list_item_get_item (li)))))
 
@@ -508,7 +506,7 @@ create_view_ui (NautilusGridView *self)
      * activation, as it affects the selection behavior as well (e.g. selects on
      * hover). Setting it to FALSE gives us the expected behavior. */
     gtk_grid_view_set_single_click_activate (GTK_GRID_VIEW (widget), FALSE);
-    gtk_grid_view_set_max_columns (GTK_GRID_VIEW (widget), MAX_COLUMNS);
+    gtk_grid_view_set_max_columns (GTK_GRID_VIEW (widget), 20);
     gtk_grid_view_set_tab_behavior (GTK_GRID_VIEW (widget), GTK_LIST_TAB_ITEM);
 
     gtk_accessible_update_property (GTK_ACCESSIBLE (widget),
@@ -524,60 +522,6 @@ create_view_ui (NautilusGridView *self)
     g_signal_connect (widget, "activate", G_CALLBACK (on_grid_view_item_activated), self);
 
     return GTK_GRID_VIEW (widget);
-}
-
-static void
-measure_layout (GtkWidget      *widget,
-                GtkOrientation  orientation,
-                int             for_size,
-                int            *minimum,
-                int            *natural,
-                int            *minimum_baseline,
-                int            *natural_baseline)
-{
-    for (GtkWidget *child = gtk_widget_get_first_child (widget);
-         child != NULL;
-         child = gtk_widget_get_next_sibling (child))
-    {
-        if (gtk_widget_should_layout (child))
-        {
-            int child_min = 0, child_nat = 0;
-
-            gtk_widget_measure (child, orientation, for_size,
-                                &child_min, &child_nat, NULL, NULL);
-            *minimum = MAX (*minimum, child_min);
-            *natural = MAX (*natural, child_nat);
-        }
-    }
-}
-
-static void
-allocate_layout (GtkWidget *widget,
-                 int        width,
-                 int        height,
-                 int        baseline)
-{
-    NautilusGridView *self = NAUTILUS_GRID_VIEW (widget);
-    guint icon_size = get_icon_size_for_zoom_level (self->zoom_level);
-    int cell_width = nautilus_grid_cell_get_width_for_icon_size (icon_size);
-
-    /* GtkGridView keeps widgets for max-columns × 30 rows alive, so limit it
-     * to the columns that can fit. Cells are never narrower than cell_width,
-     * so the layout is the same, but far fewer cells are created. This is
-     * done before allocating the grid view, so it uses the new value. */
-    guint max_columns = CLAMP (width / cell_width + 1, 1, MAX_COLUMNS);
-
-    gtk_grid_view_set_max_columns (self->view_ui, max_columns);
-
-    for (GtkWidget *child = gtk_widget_get_first_child (widget);
-         child != NULL;
-         child = gtk_widget_get_next_sibling (child))
-    {
-        if (gtk_widget_should_layout (child))
-        {
-            gtk_widget_allocate (child, width, height, baseline, NULL);
-        }
-    }
 }
 
 static void
@@ -606,9 +550,6 @@ nautilus_grid_view_init (NautilusGridView *self)
 {
     GtkWidget *scrolled_window = nautilus_list_base_get_scrolled_window (NAUTILUS_LIST_BASE (self));
 
-    /* Like the bin layout, but limits the columns before allocating */
-    gtk_widget_set_layout_manager (GTK_WIDGET (self),
-                                   gtk_custom_layout_new (NULL, measure_layout, allocate_layout));
     gtk_widget_add_css_class (GTK_WIDGET (self), "nautilus-grid-view");
 
     set_captions_from_preferences (self);
