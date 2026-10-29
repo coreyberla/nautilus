@@ -7,6 +7,7 @@
 #include "nautilus-name-cell.h"
 
 #include <adwaita.h>
+#include <glib/gi18n.h>
 
 #include "nautilus-directory.h"
 #include "nautilus-file.h"
@@ -103,6 +104,47 @@ get_path_text (NautilusFile *file,
 }
 
 static void
+popover_show_cb (NautilusNameCell *self)
+{
+    const char *label = gtk_label_get_label (self->snippet);
+
+    gtk_accessible_announce (GTK_ACCESSIBLE (self),
+                             label,
+                             GTK_ACCESSIBLE_ANNOUNCEMENT_PRIORITY_MEDIUM);
+}
+
+/* Only search results with a full text match have a snippet, so the button
+ * is created when needed instead of for every row. */
+static void
+ensure_snippet_button (NautilusNameCell *self)
+{
+    if (self->snippet_button != NULL)
+    {
+        return;
+    }
+
+    self->snippet = GTK_LABEL (gtk_label_new (NULL));
+    gtk_label_set_ellipsize (self->snippet, PANGO_ELLIPSIZE_NONE);
+    gtk_label_set_justify (self->snippet, GTK_JUSTIFY_LEFT);
+    gtk_label_set_max_width_chars (self->snippet, 65);
+    gtk_label_set_lines (self->snippet, 10);
+    gtk_label_set_wrap (self->snippet, TRUE);
+    gtk_label_set_wrap_mode (self->snippet, PANGO_WRAP_WORD);
+
+    GtkWidget *popover = gtk_popover_new ();
+    gtk_popover_set_child (GTK_POPOVER (popover), GTK_WIDGET (self->snippet));
+    g_signal_connect_swapped (popover, "show", G_CALLBACK (popover_show_cb), self);
+
+    self->snippet_button = gtk_menu_button_new ();
+    gtk_widget_set_tooltip_text (self->snippet_button, _("Full Text Match"));
+    gtk_menu_button_set_icon_name (GTK_MENU_BUTTON (self->snippet_button), "quotation-symbolic");
+    gtk_widget_set_valign (self->snippet_button, GTK_ALIGN_CENTER);
+    gtk_widget_add_css_class (self->snippet_button, "fts-snippet");
+    gtk_menu_button_set_popover (GTK_MENU_BUTTON (self->snippet_button), popover);
+    gtk_box_append (GTK_BOX (self->content), self->snippet_button);
+}
+
+static void
 update_labels (NautilusNameCell *self)
 {
     g_autoptr (NautilusViewItem) item = NULL;
@@ -123,14 +165,20 @@ update_labels (NautilusNameCell *self)
     }
 
     gtk_label_set_text (GTK_LABEL (self->path), path_text);
-    if (fts_snippet != NULL &&
-        !g_str_equal (gtk_label_get_text (self->snippet), fts_snippet))
+    if (fts_snippet != NULL)
     {
-        gtk_label_set_markup (self->snippet, fts_snippet);
+        ensure_snippet_button (self);
+        if (!g_str_equal (gtk_label_get_text (self->snippet), fts_snippet))
+        {
+            gtk_label_set_markup (self->snippet, fts_snippet);
+        }
     }
 
     gtk_widget_set_visible (self->path, (path_text != NULL));
-    gtk_widget_set_visible (self->snippet_button, (fts_snippet != NULL));
+    if (self->snippet_button != NULL)
+    {
+        gtk_widget_set_visible (self->snippet_button, (fts_snippet != NULL));
+    }
 }
 
 static void
@@ -312,16 +360,6 @@ on_item_is_loading_changed (NautilusNameCell *self)
     }
 }
 
-static void
-popover_show_cb (NautilusNameCell *self)
-{
-    const char *label = gtk_label_get_label (self->snippet);
-
-    gtk_accessible_announce (GTK_ACCESSIBLE (self),
-                             label,
-                             GTK_ACCESSIBLE_ANNOUNCEMENT_PRIORITY_MEDIUM);
-}
-
 static gboolean
 on_label_query_tooltip (GtkWidget  *widget,
                         int         x,
@@ -477,12 +515,9 @@ nautilus_name_cell_class_init (NautilusNameCellClass *klass)
     gtk_widget_class_bind_template_child (widget_class, NautilusNameCell, spinner);
     gtk_widget_class_bind_template_child (widget_class, NautilusNameCell, icon);
     gtk_widget_class_bind_template_child (widget_class, NautilusNameCell, emblems_box);
-    gtk_widget_class_bind_template_child (widget_class, NautilusNameCell, snippet_button);
-    gtk_widget_class_bind_template_child (widget_class, NautilusNameCell, snippet);
     gtk_widget_class_bind_template_child (widget_class, NautilusNameCell, path);
 
     gtk_widget_class_bind_template_callback (widget_class, on_label_query_tooltip);
-    gtk_widget_class_bind_template_callback (widget_class, popover_show_cb);
 }
 
 NautilusViewCell *

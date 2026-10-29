@@ -90,30 +90,6 @@ template $NautilusNameCell: $NautilusViewCell {
           ]
         }
       }
-
-      MenuButton snippet_button {
-        tooltip-text: _("Full Text Match");
-        visible: false;
-        icon-name: "quotation-symbolic";
-        valign: center;
-
-        styles [
-          "fts-snippet",
-        ]
-
-        popover: Popover {
-          Label snippet {
-            ellipsize: none;
-            justify: left;
-            max-width-chars: 65;
-            lines: 10;
-            wrap: true;
-            wrap-mode: word;
-          }
-
-          show => $popover_show_cb(template);
-        };
-      }
     }
   }
 }
