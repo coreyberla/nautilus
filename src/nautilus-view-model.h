@@ -33,6 +33,8 @@ void nautilus_view_model_set_sorter (NautilusViewModel *self,
 void nautilus_view_model_set_section_sorter (NautilusViewModel *self,
                                              GtkSorter         *section_sorter);
 void nautilus_view_model_sort (NautilusViewModel *self);
+void nautilus_view_model_sort_files (NautilusViewModel *self,
+                                     GList             *files);
 NautilusViewItem * nautilus_view_model_get_item_for_file (NautilusViewModel *self,
                                                           NautilusFile      *file);
 GList * nautilus_view_model_get_sorted_items_for_files (NautilusViewModel *self,

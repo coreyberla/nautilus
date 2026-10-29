@@ -530,6 +530,97 @@ nautilus_view_model_sort (NautilusViewModel *self)
     }
 }
 
+static NautilusViewItem *
+get_item_at (NautilusViewModel *self,
+             guint              position)
+{
+    g_autoptr (GtkTreeListRow) row = g_list_model_get_item (G_LIST_MODEL (self->sort_model), position);
+
+    return gtk_tree_list_row_get_item (row);
+}
+
+static gboolean
+is_item_in_order (NautilusViewModel *self,
+                  GtkSorter         *sorter,
+                  NautilusViewItem  *item)
+{
+    guint n_items = g_list_model_get_n_items (G_LIST_MODEL (self->sort_model));
+    guint low = 0;
+    guint high = n_items;
+
+    /* Find the item assuming the others are in order. If they aren't, it may
+     * not be found, which reports it as out of order. */
+    while (low < high)
+    {
+        guint middle = low + (high - low) / 2;
+        g_autoptr (NautilusViewItem) other = get_item_at (self, middle);
+
+        if (other == item)
+        {
+            g_autoptr (NautilusViewItem) previous = middle > 0 ? get_item_at (self, middle - 1) : NULL;
+            g_autoptr (NautilusViewItem) next = middle + 1 < n_items ? get_item_at (self, middle + 1) : NULL;
+
+            return (previous == NULL ||
+                    gtk_sorter_compare (sorter, previous, item) != GTK_ORDERING_LARGER) &&
+                   (next == NULL ||
+                    gtk_sorter_compare (sorter, item, next) != GTK_ORDERING_LARGER);
+        }
+
+        if (gtk_sorter_compare (sorter, other, item) == GTK_ORDERING_SMALLER)
+        {
+            low = middle + 1;
+        }
+        else
+        {
+            high = middle;
+        }
+    }
+
+    return FALSE;
+}
+
+/**
+ * nautilus_view_model_sort_files:
+ * @files: (element-type NautilusFile): files that changed
+ *
+ * Re-sorts if any of @files is out of place after changing. Checking each one
+ * takes a few comparisons, while re-sorting compares every item, so this is
+ * much cheaper when the changes don't affect the order.
+ */
+void
+nautilus_view_model_sort_files (NautilusViewModel *self,
+                                GList             *files)
+{
+    GtkSorter *sorter = nautilus_view_model_get_sorter (self);
+
+    if (sorter == NULL)
+    {
+        return;
+    }
+
+    /* Only top level rows without sections are ordered by the item sorter
+     * alone. */
+    if (self->expand_as_a_tree ||
+        gtk_sort_list_model_get_section_sorter (self->sort_model) != NULL)
+    {
+        nautilus_view_model_sort (self);
+
+        return;
+    }
+
+    for (GList *l = files; l != NULL; l = l->next)
+    {
+        NautilusViewItem *item = nautilus_view_model_get_item_for_file (self, l->data);
+
+        if (item != NULL && !is_item_in_order (self, sorter, item))
+        {
+            nautilus_view_model_sort (self);
+
+            return;
+        }
+    }
+}
+
 GList *
 nautilus_view_model_get_sorted_items_for_files (NautilusViewModel *self,
                                                 GList             *files)

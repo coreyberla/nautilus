@@ -4266,7 +4266,7 @@ process_pending_files (NautilusFilesView *self)
 
     g_autoptr (GList) pending_additions = NULL;
     g_autoptr (GHashTable) files_removed = g_hash_table_new (NULL, NULL);
-    gboolean shown_files_changed = FALSE;
+    g_autoptr (GList) shown_files_changed = NULL;
 
     remove_fad_duplicates (&files_added);
     remove_fad_duplicates (&files_changed);
@@ -4309,7 +4309,7 @@ process_pending_files (NautilusFilesView *self)
         {
             g_signal_emit (self,
                            signals[FILE_CHANGED], 0, pending->file, pending->directory);
-            shown_files_changed = TRUE;
+            shown_files_changed = g_list_prepend (shown_files_changed, pending->file);
         }
         else
         {
@@ -4363,10 +4363,7 @@ process_pending_files (NautilusFilesView *self)
 
     /* Added files are sorted into place by the model, but changed ones may
      * need to move. */
-    if (shown_files_changed)
-    {
-        nautilus_view_model_sort (self->model);
-    }
+    nautilus_view_model_sort_files (self->model, shown_files_changed);
 
     g_signal_emit (self, signals[END_FILE_CHANGES], 0);
 }
