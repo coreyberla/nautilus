@@ -1,0 +1,71 @@
+diff --git a/src/nautilus-directory-async.c b/src/nautilus-directory-async.c
+index 99e41cb..38c3d13 100644
+--- a/src/nautilus-directory-async.c
++++ b/src/nautilus-directory-async.c
+@@ -1033,6 +1033,9 @@ static void
+ directory_load_done (NautilusDirectory *directory,
+                      GError            *error)
+ {
++    g_message ("LOAD-TIMING enumerated in %.1f ms",
++               (g_get_monotonic_time () - GPOINTER_TO_SIZE (g_object_get_data (G_OBJECT (directory), "load-timing-start"))) / 1000.0);
++
+     GList *node;
+ 
+     g_object_ref (directory);
+@@ -2152,6 +2155,7 @@ start_monitoring_file_list (NautilusDirectory *directory)
+ 
+     directory->details->directory_load_in_progress = state;
+ 
++    g_object_set_data (G_OBJECT (directory), "load-timing-start", GSIZE_TO_POINTER (g_get_monotonic_time ()));
+     /* Start with all types except content_type */
+     g_file_enumerate_children_async (directory->details->location,
+                                      g_file_is_native (directory->details->location) ?
+diff --git a/src/nautilus-files-view.c b/src/nautilus-files-view.c
+index 7628df7..a3901ad 100644
+--- a/src/nautilus-files-view.c
++++ b/src/nautilus-files-view.c
+@@ -16,6 +16,7 @@
+ 
+ #include <gdk/gdk.h>
+ #include <gio/gio.h>
++#include <unistd.h>
+ #include <glib/gi18n.h>
+ #include <glib/gstdio.h>
+ #include <gtk/gtk.h>
+@@ -130,6 +131,8 @@ struct _NautilusFilesView
+ {
+     AdwBin parent;
+ 
++    gint64 load_start_time;
++
+     /* Main components */
+     GtkWidget *overlay;
+     NautilusListBase *list_base;
+@@ -3774,6 +3777,19 @@ done_loading (NautilusFilesView *self,
+         return;
+     }
+ 
++    if (self->load_start_time != 0 && all_files_seen)
++    {
++        g_autofree char *uri = self->location ? g_file_get_uri (self->location) : NULL;
++        gint64 now = g_get_monotonic_time ();
++
++        /* Times are g_get_monotonic_time (), for syscap-window */
++        g_message ("LOAD-TIMING %s: %u items, done_loading after %.1f ms (pid %d, %" G_GINT64_FORMAT " -> %" G_GINT64_FORMAT ")",
++                   uri, g_list_model_get_n_items (G_LIST_MODEL (self->model)),
++                   (now - self->load_start_time) / 1000.0, getpid (),
++                   self->load_start_time, now);
++        self->load_start_time = 0;
++    }
++
+     if (!self->in_destruction)
+     {
+         g_autoptr (GtkBitset) selection = gtk_selection_model_get_selection (GTK_SELECTION_MODEL (self->model));
+@@ -8537,6 +8553,7 @@ load_directory (NautilusFilesView *self,
+     }
+ 
+     self->loading = TRUE;
++    self->load_start_time = g_get_monotonic_time ();
+ 
+     setup_loading_floating_bar (self);
+ 

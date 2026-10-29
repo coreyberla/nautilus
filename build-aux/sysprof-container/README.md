@@ -32,6 +32,24 @@ For the Fedora image, `--build-arg GNOME_FROM_GIT=1` rebuilds glib, gtk and
 libadwaita from git like `.gitlab/image-script.sh` does, for when rawhide lags
 behind what `meson.build` requires.
 
+## Profiling only a folder load
+
+`PROFILE_OPEN=/some/folder` lets nautilus start up first (`PROFILE_SETTLE`,
+default 8 seconds), then has the running instance open that folder and keeps
+recording for `PROFILE_SECONDS` (default 5). To look at just the load:
+
+1. Apply `load-timing.patch`. It logs the time from starting to load a folder
+   until all its files are in the view, with the process id and
+   `g_get_monotonic_time ()` stamps, and when the enumeration finished.
+2. Record with `-e PROFILE_OPEN=/some/folder` and note the `LOAD-TIMING` line.
+3. Build `syscap-window.c` in the container (`apt-get install
+   libsysprof-6-dev` on Ubuntu) and run it with the capture, the pid and the
+   two stamps from that line. `TID=<pid>` restricts it to the main thread,
+   `HIST=10` shows what the main thread and the workers did over time.
+
+`GSK_RENDERER=cairo` (via `-e`) avoids llvmpipe compiling shaders during the
+load, which otherwise dominates profiles in VMs without a GPU.
+
 ## Claude Code cloud sessions
 
 In the cloud sandbox, Fedora hosts and gitlab.gnome.org are blocked, Docker

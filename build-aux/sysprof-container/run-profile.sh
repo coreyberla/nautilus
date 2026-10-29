@@ -4,6 +4,9 @@
 #
 # Usage: run-profile.sh [OUTPUT.syscap] [-- extra nautilus args]
 # PROFILE_SECONDS (default 30) sets how long to record before stopping.
+# PROFILE_OPEN=DIR waits PROFILE_SETTLE seconds (default 8) for startup, then
+# has the running instance open DIR and records PROFILE_SECONDS (default 5)
+# more.
 set -euo pipefail
 
 out=$(realpath -m "${1:-/src/_profile/nautilus.syscap}")
@@ -80,9 +83,23 @@ exec runuser -u "$user" -- env XDG_RUNTIME_DIR="$runtime_dir" \
     mutter_pid=$!
     for _ in $(seq 50); do [ -S "$XDG_RUNTIME_DIR/wayland-0" ] && break; sleep 0.2; done
     export WAYLAND_DISPLAY=wayland-0 GDK_BACKEND=wayland
-    # SIGINT makes sysprof-cli stop recording and write the capture.
-    timeout -s INT --preserve-status "${PROFILE_SECONDS:-30}" \
-        sysprof-cli --force --gtk --use-trace-fd --session-bus "$0" -- nautilus --new-window "$@" || rc=$?
+    if [ -n "${PROFILE_OPEN:-}" ]; then
+        # Let nautilus finish starting up, then have the running instance
+        # open PROFILE_OPEN while still recording.
+        sysprof-cli --force --gtk --use-trace-fd --session-bus "$0" -- nautilus --new-window "$@" &
+        sysprof_pid=$!
+        sleep "${PROFILE_SETTLE:-8}"
+        nautilus "$PROFILE_OPEN"
+        sleep "${PROFILE_SECONDS:-5}"
+        # sysprof-cli stops recording and writes the capture once its child
+        # exits.
+        nautilus -q
+        wait $sysprof_pid || rc=$?
+    else
+        # SIGINT makes sysprof-cli stop recording and write the capture.
+        timeout -s INT --preserve-status "${PROFILE_SECONDS:-30}" \
+            sysprof-cli --force --gtk --use-trace-fd --session-bus "$0" -- nautilus --new-window "$@" || rc=$?
+    fi
     kill $mutter_pid
     exit ${rc:-0}
 ' "$out" "$@"
