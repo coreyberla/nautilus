@@ -1,0 +1,36 @@
+# Ubuntu 26.10 alternative to Containerfile, for when the Fedora registries
+# and mirrors are unreachable. See README.md in this directory.
+ARG BASE=ubuntu:26.10
+FROM ${BASE}
+
+ARG DEBIAN_FRONTEND=noninteractive
+RUN set -e; \
+    . /etc/os-release; \
+    printf 'Types: deb deb-src\nURIs: http://archive.ubuntu.com/ubuntu\nSuites: %s\nComponents: main universe\nSigned-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n' \
+        "$VERSION_CODENAME" > /etc/apt/sources.list.d/ubuntu.sources; \
+    rm -f /etc/apt/sources.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ubuntu-dbgsym-keyring ca-certificates; \
+    # Debug symbol packages (-dbgsym) live in a separate archive
+    printf 'Types: deb\nURIs: http://ddebs.ubuntu.com\nSuites: %s\nComponents: main universe\nSigned-By: /usr/share/keyrings/ubuntu-dbgsym-keyring.gpg\n' \
+        "$VERSION_CODENAME" > /etc/apt/sources.list.d/ddebs.sources; \
+    apt-get update; \
+    apt-get build-dep -y nautilus; \
+    apt-get install -y --no-install-recommends \
+        git gcc gdb meson ninja-build pkgconf locales \
+        sysprof mutter dbus dbus-daemon dbus-user-session polkitd \
+        libdebuginfod1t64 elfutils adwaita-icon-theme gnome-settings-daemon-common \
+        gsettings-desktop-schemas localsearch glycin-loaders \
+        libglib2.0-0t64-dbgsym libgtk-4-1-dbgsym libadwaita-1-0-dbgsym \
+        libglycin-2-0-dbgsym libglycin-gtk4-2-0-dbgsym libtinysparql-3.0-0-dbgsym \
+        libgnome-desktop-4-2t64-dbgsym libgnome-autoar-0-0-dbgsym \
+        libgexiv2-0.16-4-dbgsym libportal1-dbgsym libportal-gtk4-1-dbgsym \
+        libcloudproviders0-dbgsym libpango-1.0-0-dbgsym libcairo2-dbgsym \
+        libharfbuzz0b-dbgsym libgraphene-1.0-0-dbgsym libpixman-1-0-dbgsym \
+        libmutter-51-0-dbgsym libc6-dbg; \
+    sed -i 's/# en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen; locale-gen; \
+    rm -rf /var/lib/apt/lists/*
+
+ENV LANG=en_US.UTF-8 \
+    DEBUGINFOD_URLS=https://debuginfod.ubuntu.com/
+WORKDIR /src
