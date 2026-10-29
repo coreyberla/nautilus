@@ -4070,8 +4070,6 @@ still_should_show_file (NautilusFilesView *view,
 static void
 files_view_end_file_changes (NautilusFilesView *self)
 {
-    nautilus_view_model_sort (self->model);
-
     /* Addition and removal of files modify the empty state */
     nautilus_files_view_update_status_overlay (self);
     /* If the view is empty, zoom slider and sort menu are insensitive */
@@ -4268,6 +4266,7 @@ process_pending_files (NautilusFilesView *self)
 
     g_autoptr (GList) pending_additions = NULL;
     g_autoptr (GHashTable) files_removed = g_hash_table_new (NULL, NULL);
+    gboolean shown_files_changed = FALSE;
 
     remove_fad_duplicates (&files_added);
     remove_fad_duplicates (&files_changed);
@@ -4310,6 +4309,7 @@ process_pending_files (NautilusFilesView *self)
         {
             g_signal_emit (self,
                            signals[FILE_CHANGED], 0, pending->file, pending->directory);
+            shown_files_changed = TRUE;
         }
         else
         {
@@ -4359,6 +4359,13 @@ process_pending_files (NautilusFilesView *self)
              */
             nautilus_files_view_send_selection_change (self);
         }
+    }
+
+    /* Added files are sorted into place by the model, but changed ones may
+     * need to move. */
+    if (shown_files_changed)
+    {
+        nautilus_view_model_sort (self->model);
     }
 
     g_signal_emit (self, signals[END_FILE_CHANGES], 0);
