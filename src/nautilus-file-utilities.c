@@ -1208,7 +1208,6 @@ nautilus_recursive_directory_iterator_new (GFile                 *directory,
     self->visited = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
     self->attributes = g_strconcat (attributes != NULL
                                     ? attributes : G_FILE_ATTRIBUTE_STANDARD_NAME,
-                                    /* Needed to skip remote checks within a filesystem */
                                     local_only ? "," G_FILE_ATTRIBUTE_ID_FILESYSTEM : NULL,
                                     NULL);
     self->max_depth = max_depth;
@@ -1240,51 +1239,6 @@ is_remote (GFile *location)
            g_file_info_get_attribute_boolean (file_system_info, G_FILE_ATTRIBUTE_FILESYSTEM_REMOTE);
 }
 
-typedef struct
-{
-    GFile *location;
-    /* Filesystem id of location, or NULL if unknown */
-    char *fs_id;
-} PendingDirectory;
-
-static PendingDirectory *
-pending_directory_new (GFile      *location,
-                       const char *fs_id)
-{
-    PendingDirectory *self = g_new (PendingDirectory, 1);
-
-    self->location = g_object_ref (location);
-    self->fs_id = g_strdup (fs_id);
-
-    return self;
-}
-
-static void
-pending_directory_free (PendingDirectory *self)
-{
-    g_object_unref (self->location);
-    g_free (self->fs_id);
-    g_free (self);
-}
-
-G_DEFINE_AUTOPTR_CLEANUP_FUNC (PendingDirectory, pending_directory_free)
-
-/* Only local directories are ever enumerated when remote ones are skipped, so a
- * child on the same filesystem as its parent is known to be local. Only query
- * the filesystem when crossing into a different (or unknown) one. */
-static gboolean
-child_is_remote (const char *parent_fs_id,
-                 const char *child_fs_id,
-                 GFile      *child_location)
-{
-    if (parent_fs_id != NULL && g_strcmp0 (parent_fs_id, child_fs_id) == 0)
-    {
-        return FALSE;
-    }
-
-    return is_remote (child_location);
-}
-
 static void
 recursive_directory_iterator_thread (GTask        *task,
                                      GObject      *source_object,
@@ -1292,39 +1246,35 @@ recursive_directory_iterator_thread (GTask        *task,
                                      GCancellable *cancellable)
 {
     NautilusRecursiveDirectoryIterator *self = task_data;
-    g_autoqueue (PendingDirectory) pending_directories = g_queue_new ();
-    g_autofree char *toplevel_fs_id = NULL;
+    g_autoqueue (GFile) pending_directories = g_queue_new ();
+    g_autoptr (GFileInfo) toplevel_info = NULL;
+    const char *toplevel_fs_id = NULL;
 
     if (self->local_only)
     {
-        g_autoptr (GFileInfo) toplevel_info =
-            g_file_query_info (self->directory, G_FILE_ATTRIBUTE_ID_FILESYSTEM,
-                               G_FILE_QUERY_INFO_NONE, self->cancellable, NULL);
-
-        if (toplevel_info != NULL)
-        {
-            toplevel_fs_id = g_strdup (g_file_info_get_attribute_string (toplevel_info,
-                                                                         G_FILE_ATTRIBUTE_ID_FILESYSTEM));
-        }
+        /* Remote directories are never enumerated, so anything on the toplevel's
+         * filesystem is known to be local and needs no remote check. */
+        toplevel_info = g_file_query_info (self->directory, G_FILE_ATTRIBUTE_ID_FILESYSTEM,
+                                           G_FILE_QUERY_INFO_NONE, self->cancellable, NULL);
+        toplevel_fs_id = toplevel_info != NULL
+                         ? g_file_info_get_attribute_string (toplevel_info, G_FILE_ATTRIBUTE_ID_FILESYSTEM)
+                         : NULL;
     }
 
-    g_queue_push_tail (pending_directories, pending_directory_new (self->directory, toplevel_fs_id));
+    g_queue_push_tail (pending_directories, g_object_ref (self->directory));
 
     for (guint depth = 0;
          depth <= self->max_depth && g_queue_get_length (pending_directories) > 0;
          depth++)
     {
         /* Breadth-first iteration, all stored directories are for next depth level */
-        g_autoqueue (PendingDirectory) directories_at_depth = g_steal_pointer (&pending_directories);
-        /* Subdirectories found at the last depth level are never enumerated */
-        gboolean descend = depth < self->max_depth;
+        g_autoqueue (GFile) directories_at_depth = g_steal_pointer (&pending_directories);
 
         pending_directories = g_queue_new ();
 
         while (!g_queue_is_empty (directories_at_depth))
         {
-            g_autoptr (PendingDirectory) pending = g_queue_pop_head (directories_at_depth);
-            GFile *directory = pending->location;
+            g_autoptr (GFile) directory = g_queue_pop_head (directories_at_depth);
             g_autoptr (GError) error = NULL;
             g_autoptr (GFileEnumerator) enumerator =
                 g_file_enumerate_children (directory,
@@ -1344,13 +1294,14 @@ recursive_directory_iterator_thread (GTask        *task,
 
             while (g_file_enumerator_iterate (enumerator, &info, &location, self->cancellable, &error) && info != NULL)
             {
-                const char *fs_id = self->local_only
-                                    ? g_file_info_get_attribute_string (info, G_FILE_ATTRIBUTE_ID_FILESYSTEM)
-                                    : NULL;
-
-                if (g_file_info_get_file_type (info) == G_FILE_TYPE_DIRECTORY &&
-                    (!self->local_only || !descend ||
-                     !child_is_remote (pending->fs_id, fs_id, location)))
+                /* Subdirectories at the last depth level would never be enumerated */
+                if (depth < self->max_depth &&
+                    g_file_info_get_file_type (info) == G_FILE_TYPE_DIRECTORY &&
+                    (!self->local_only ||
+                     (toplevel_fs_id != NULL &&
+                      g_strcmp0 (toplevel_fs_id,
+                                 g_file_info_get_attribute_string (info, G_FILE_ATTRIBUTE_ID_FILESYSTEM)) == 0) ||
+                     !is_remote (location)))
                 {
                     const char *id = g_file_info_get_attribute_string (info, G_FILE_ATTRIBUTE_ID_FILE);
 
@@ -1367,11 +1318,7 @@ recursive_directory_iterator_thread (GTask        *task,
                         }
                     }
 
-                    if (descend)
-                    {
-                        g_queue_push_tail (pending_directories,
-                                           pending_directory_new (location, fs_id));
-                    }
+                    g_queue_push_tail (pending_directories, g_object_ref (location));
                 }
 
                 self->file_callback (info, location, self->user_data);
