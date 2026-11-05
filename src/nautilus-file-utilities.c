@@ -1294,14 +1294,15 @@ recursive_directory_iterator_thread (GTask        *task,
 
             while (g_file_enumerator_iterate (enumerator, &info, &location, self->cancellable, &error) && info != NULL)
             {
+                /* toplevel_fs_id is only set when local_only, so the attribute is requested */
+                gboolean fs_id_is_same = toplevel_fs_id != NULL &&
+                                         g_strcmp0 (toplevel_fs_id,
+                                                    g_file_info_get_attribute_string (info, G_FILE_ATTRIBUTE_ID_FILESYSTEM)) == 0;
+
                 /* Subdirectories at the last depth level would never be enumerated */
                 if (depth < self->max_depth &&
                     g_file_info_get_file_type (info) == G_FILE_TYPE_DIRECTORY &&
-                    (!self->local_only ||
-                     (toplevel_fs_id != NULL &&
-                      g_strcmp0 (toplevel_fs_id,
-                                 g_file_info_get_attribute_string (info, G_FILE_ATTRIBUTE_ID_FILESYSTEM)) == 0) ||
-                     !is_remote (location)))
+                    (!self->local_only || fs_id_is_same || !is_remote (location)))
                 {
                     const char *id = g_file_info_get_attribute_string (info, G_FILE_ATTRIBUTE_ID_FILE);
 
