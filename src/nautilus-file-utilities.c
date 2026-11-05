@@ -1296,12 +1296,12 @@ recursive_directory_iterator_thread (GTask        *task,
             {
                 const char *fs_id = g_file_info_get_attribute_string (info, G_FILE_ATTRIBUTE_ID_FILESYSTEM);
                 /* An unknown fs id never counts as the same filesystem */
-                gboolean fs_id_is_same = fs_id != NULL && g_strcmp0 (fs_id, toplevel_fs_id) == 0;
+                gboolean fs_is_same = fs_id != NULL && g_strcmp0 (fs_id, toplevel_fs_id) == 0;
 
                 /* Subdirectories at the last depth level would never be enumerated */
                 if (depth < self->max_depth &&
                     g_file_info_get_file_type (info) == G_FILE_TYPE_DIRECTORY &&
-                    (!self->local_only || fs_id_is_same || !is_remote (location)))
+                    (!self->local_only || fs_is_same || !is_remote (location)))
                 {
                     const char *id = g_file_info_get_attribute_string (info, G_FILE_ATTRIBUTE_ID_FILE);
 
