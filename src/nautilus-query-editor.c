@@ -859,6 +859,14 @@ nautilus_query_editor_set_query (NautilusQueryEditor *self,
     self->change_frozen = FALSE;
 }
 
+/**
+ * nautilus_query_editor_set_input_interceptor:
+ * @self: A #NautilusQueryEditor instance.
+ * @interceptor: (nullable): The widget to capture text input from.
+ *
+ * Text typed while focus is within @interceptor is redirected to the search entry,
+ * emitting #NautilusQueryEditor::search-started.
+ */
 void
 nautilus_query_editor_set_input_interceptor (NautilusQueryEditor *self,
                                              GtkWidget           *interceptor)

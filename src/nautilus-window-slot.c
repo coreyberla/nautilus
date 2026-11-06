@@ -822,8 +822,9 @@ nautilus_window_slot_constructed (GObject *object)
     /* We want to keep alive the query editor betwen additions and removals on the
      * UI, specifically when the toolbar adds or removes it */
     g_object_ref_sink (self->query_editor);
-    g_signal_connect (self->query_editor, "search-started",
-                      G_CALLBACK (query_editor_search_started_callback), self);
+    g_signal_connect_object (self->query_editor, "search-started",
+                             G_CALLBACK (query_editor_search_started_callback), self,
+                             G_CONNECT_DEFAULT);
 
     self->banner = ADW_BANNER (adw_banner_new (""));
     gtk_box_append (GTK_BOX (self->vbox),
@@ -2557,11 +2558,7 @@ nautilus_window_slot_dispose (GObject *object)
     g_cancellable_cancel (self->find_mount_cancellable);
     g_clear_object (&self->find_mount_cancellable);
 
-    if (self->query_editor != NULL)
-    {
-        g_signal_handlers_disconnect_by_data (self->query_editor, self);
-        g_clear_object (&self->query_editor);
-    }
+    g_clear_object (&self->query_editor);
 
     free_location_change (self);
 
