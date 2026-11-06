@@ -554,20 +554,6 @@ nautilus_window_slot_handle_activate_files (NautilusWindowSlot *self,
     return TRUE;
 }
 
-gboolean
-nautilus_window_slot_handle_event (NautilusWindowSlot *self,
-                                   guint               keyval)
-{
-    if (keyval == GDK_KEY_Escape &&
-        nautilus_window_slot_get_search_visible (self))
-    {
-        nautilus_window_slot_set_search_visible (self, FALSE);
-        return GDK_EVENT_STOP;
-    }
-
-    return GDK_EVENT_PROPAGATE;
-}
-
 static void
 nautilus_window_slot_remove_extra_location_widgets (NautilusWindowSlot *self)
 {
@@ -967,7 +953,11 @@ action_search_visible (GSimpleAction *action,
 
     if (g_variant_get_boolean (current_state) != search_visible)
     {
+        GAction *hide_search = g_action_map_lookup_action (G_ACTION_MAP (self->slot_action_group),
+                                                           "hide-search");
+
         g_simple_action_set_state (action, state);
+        g_simple_action_set_enabled (G_SIMPLE_ACTION (hide_search), search_visible);
 
         if (search_visible)
         {
@@ -999,6 +989,16 @@ action_search_visible (GSimpleAction *action,
             nautilus_window_slot_set_search_global (self, FALSE);
         }
     }
+}
+
+static void
+action_hide_search (GSimpleAction *action,
+                    GVariant      *parameter,
+                    gpointer       user_data)
+{
+    NautilusWindowSlot *self = NAUTILUS_WINDOW_SLOT (user_data);
+
+    nautilus_window_slot_set_search_visible (self, FALSE);
 }
 
 static void
@@ -1191,6 +1191,7 @@ const GActionEntry slot_entries[] =
     },
     { .name = "files-view-mode-toggle", .activate = action_files_view_mode_toggle },
     { .name = "search-visible", .state = "false", .change_state = action_search_visible },
+    { .name = "hide-search", .activate = action_hide_search },
     { .name = "search-global", .state = "false", .change_state = action_search_global },
     { .name = "focus-search", .activate = action_focus_search },
     { .name = "reload", .activate = action_reload },
@@ -1277,6 +1278,13 @@ nautilus_window_slot_init (NautilusWindowSlot *self)
                                      slot_entries,
                                      G_N_ELEMENTS (slot_entries),
                                      self);
+
+    /* Only enabled while search is visible, so that its Escape shortcut lets
+     * the key propagate otherwise. */
+    GAction *hide_search = g_action_map_lookup_action (G_ACTION_MAP (self->slot_action_group),
+                                                       "hide-search");
+    g_simple_action_set_enabled (G_SIMPLE_ACTION (hide_search), FALSE);
+
     gtk_widget_insert_action_group (GTK_WIDGET (self),
                                     "slot",
                                     G_ACTION_GROUP (self->slot_action_group));

@@ -47,8 +47,6 @@ const gchar *nautilus_window_slot_get_title                (NautilusWindowSlot *
 
 gboolean nautilus_window_slot_handle_activate_files        (NautilusWindowSlot *slot,
                                                             GList              *files);
-gboolean nautilus_window_slot_handle_event       	   (NautilusWindowSlot    *slot,
-							    guint                  keyval);
 
 const gchar*   nautilus_window_slot_get_icon_name                (NautilusWindowSlot *slot);
 

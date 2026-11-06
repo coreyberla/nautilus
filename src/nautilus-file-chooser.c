@@ -530,24 +530,6 @@ on_location_changed (NautilusFileChooser *self)
     nautilus_filename_validator_validate (self->validator);
 }
 
-static gboolean
-on_key_pressed_bubble (GtkEventControllerKey *controller,
-                       unsigned int           keyval,
-                       unsigned int           keycode,
-                       GdkModifierType        state,
-                       gpointer               user_data)
-{
-    NautilusFileChooser *self = NAUTILUS_FILE_CHOOSER (user_data);
-
-    if (self->slot != NULL &&
-        nautilus_window_slot_handle_event (self->slot, keyval))
-    {
-        return GDK_EVENT_STOP;
-    }
-
-    return GDK_EVENT_PROPAGATE;
-}
-
 static void
 on_click_gesture_pressed (GtkGestureClick *gesture,
                           gint             n_press,
@@ -840,12 +822,7 @@ nautilus_file_chooser_init (NautilusFileChooser *self)
     nautilus_sidebar_set_show_trash (NAUTILUS_PLACES_SIDEBAR (self->places_sidebar),
                                      FALSE);
 
-    GtkEventController *controller = gtk_event_controller_key_new ();
-    gtk_widget_add_controller (GTK_WIDGET (self), controller);
-    gtk_event_controller_set_propagation_phase (controller, GTK_PHASE_BUBBLE);
-    g_signal_connect (controller, "key-pressed",
-                      G_CALLBACK (on_key_pressed_bubble), self);
-    controller = GTK_EVENT_CONTROLLER (gtk_gesture_click_new ());
+    GtkEventController *controller = GTK_EVENT_CONTROLLER (gtk_gesture_click_new ());
     gtk_widget_add_controller (GTK_WIDGET (self), controller);
     gtk_event_controller_set_propagation_phase (controller, GTK_PHASE_CAPTURE);
     gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (controller), 0);
@@ -907,6 +884,8 @@ nautilus_file_chooser_class_init (NautilusFileChooserClass *klass)
     object_class->set_property = nautilus_file_chooser_set_property;
 
     widget_class->grab_focus = nautilus_file_chooser_grab_focus;
+
+    gtk_widget_class_add_binding_action (widget_class, GDK_KEY_Escape, 0, "slot.hide-search", NULL);
 
     gtk_widget_class_set_template_from_resource (widget_class,
                                                  "/org/gnome/nautilus/ui/nautilus-file-chooser.ui");

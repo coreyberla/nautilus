@@ -1363,27 +1363,6 @@ nautilus_window_realize (GtkWidget *widget)
     update_cursor (NAUTILUS_WINDOW (widget));
 }
 
-static gboolean
-nautilus_window_key_bubble (GtkEventControllerKey *controller,
-                            unsigned int           keyval,
-                            unsigned int           keycode,
-                            GdkModifierType        state,
-                            gpointer               user_data)
-{
-    GtkWidget *widget;
-    NautilusWindow *window;
-
-    widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (controller));
-    window = NAUTILUS_WINDOW (widget);
-    if (window->active_slot != NULL &&
-        nautilus_window_slot_handle_event (window->active_slot, keyval))
-    {
-        return GDK_EVENT_STOP;
-    }
-
-    return GDK_EVENT_PROPAGATE;
-}
-
 /**
  * nautilus_window_show:
  * @widget: GtkWidget
@@ -1573,12 +1552,6 @@ nautilus_window_init (NautilusWindow *window)
     gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (controller), 0);
     g_signal_connect (controller, "pressed",
                       G_CALLBACK (on_click_gesture_pressed), NULL);
-
-    controller = gtk_event_controller_key_new ();
-    gtk_widget_add_controller (GTK_WIDGET (window), controller);
-    gtk_event_controller_set_propagation_phase (controller, GTK_PHASE_BUBBLE);
-    g_signal_connect (controller, "key-pressed",
-                      G_CALLBACK (nautilus_window_key_bubble), NULL);
 }
 
 static void
@@ -1645,6 +1618,8 @@ nautilus_window_class_init (NautilusWindowClass *class)
     wclass->grab_focus = nautilus_window_grab_focus;
 
     winclass->close_request = nautilus_window_close_request;
+
+    gtk_widget_class_add_binding_action (wclass, GDK_KEY_Escape, 0, "slot.hide-search", NULL);
 
     properties[PROP_ACTIVE_SLOT] =
         g_param_spec_object ("active-slot",
