@@ -25,11 +25,52 @@ struct _NautilusLabelCell
     GtkInscription *inscription;
     PangoLayout *measure_layout;
 
-    /* Width shared by all cells of this column in a view (refcounted with
-     * g_rc_box). It only grows, so it is the widest text seen so far. */
-    int *column_width;
+    NautilusColumnWidth *column_width;
     gboolean needs_measure;
 };
+
+/* Shared by all cells of a column in a view. */
+struct _NautilusColumnWidth
+{
+    /* Only grows, so it is the widest text seen so far. */
+    int width;
+    /* Text → width in pixels. Columns repeat a lot of values (types, owners,
+     * dates), so this saves laying out the same text again on every bind. */
+    GHashTable *text_widths;
+};
+
+#define MAX_CACHED_WIDTHS 1000
+
+static void
+column_width_clear (gpointer data)
+{
+    NautilusColumnWidth *self = data;
+
+    g_hash_table_unref (self->text_widths);
+}
+
+NautilusColumnWidth *
+nautilus_column_width_new (void)
+{
+    NautilusColumnWidth *self = g_rc_box_new0 (NautilusColumnWidth);
+
+    self->text_widths = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+
+    return self;
+}
+
+void
+nautilus_column_width_unref (NautilusColumnWidth *self)
+{
+    g_rc_box_release_full (self, column_width_clear);
+}
+
+void
+nautilus_column_width_reset (NautilusColumnWidth *self)
+{
+    self->width = 0;
+    g_hash_table_remove_all (self->text_widths);
+}
 
 G_DEFINE_FINAL_TYPE (NautilusLabelCell, nautilus_label_cell, NAUTILUS_TYPE_VIEW_CELL)
 
@@ -46,6 +87,7 @@ static void
 measure_text (NautilusLabelCell *self)
 {
     const char *text = gtk_inscription_get_text (self->inscription);
+    gpointer cached_width;
     int width;
 
     self->needs_measure = FALSE;
@@ -55,20 +97,36 @@ measure_text (NautilusLabelCell *self)
         return;
     }
 
-    if (self->measure_layout == NULL)
+    if (g_hash_table_lookup_extended (self->column_width->text_widths, text,
+                                      NULL, &cached_width))
     {
-        self->measure_layout = pango_layout_new (gtk_widget_get_pango_context (GTK_WIDGET (self->inscription)));
-        pango_layout_set_attributes (self->measure_layout,
-                                     gtk_inscription_get_attributes (self->inscription));
+        width = GPOINTER_TO_INT (cached_width);
+    }
+    else
+    {
+        if (self->measure_layout == NULL)
+        {
+            self->measure_layout = pango_layout_new (gtk_widget_get_pango_context (GTK_WIDGET (self->inscription)));
+            pango_layout_set_attributes (self->measure_layout,
+                                         gtk_inscription_get_attributes (self->inscription));
+        }
+
+        pango_layout_set_text (self->measure_layout, text, -1);
+        pango_layout_get_pixel_size (self->measure_layout, &width, NULL);
+
+        /* Columns of unique values (exact sizes, times) would grow it forever. */
+        if (g_hash_table_size (self->column_width->text_widths) >= MAX_CACHED_WIDTHS)
+        {
+            g_hash_table_remove_all (self->column_width->text_widths);
+        }
+        g_hash_table_insert (self->column_width->text_widths,
+                             g_strdup (text), GINT_TO_POINTER (width));
     }
 
-    pango_layout_set_text (self->measure_layout, text, -1);
-    pango_layout_get_pixel_size (self->measure_layout, &width, NULL);
-
     /* Only grow, so a resize is queued only when a new widest text shows up. */
-    if (width > *self->column_width)
+    if (width > self->column_width->width)
     {
-        *self->column_width = width;
+        self->column_width->width = width;
         gtk_widget_queue_resize (GTK_WIDGET (self));
     }
 }
@@ -142,7 +200,7 @@ nautilus_label_cell_measure (GtkWidget      *widget,
 
     if (orientation == GTK_ORIENTATION_HORIZONTAL)
     {
-        *minimum = *natural = *self->column_width;
+        *minimum = *natural = self->column_width->width;
     }
     else
     {
@@ -270,7 +328,7 @@ nautilus_label_cell_finalize (GObject *object)
 {
     NautilusLabelCell *self = (NautilusLabelCell *) object;
 
-    g_rc_box_release (self->column_width);
+    nautilus_column_width_unref (self->column_width);
 
     G_OBJECT_CLASS (nautilus_label_cell_parent_class)->finalize (object);
 }
@@ -300,13 +358,13 @@ nautilus_label_cell_class_init (NautilusLabelCellClass *klass)
 
 /**
  * nautilus_label_cell_new:
- * @column_width: a g_rc_box() int shared by all cells of the column, which
- *   the view resets to 0 when it loads a new directory.
+ * @column_width: shared by all cells of the column; the view resets it when it
+ *   loads a new directory.
  */
 NautilusViewCell *
-nautilus_label_cell_new (NautilusListBase *view,
-                         NautilusColumn   *column,
-                         int              *column_width)
+nautilus_label_cell_new (NautilusListBase    *view,
+                         NautilusColumn      *column,
+                         NautilusColumnWidth *column_width)
 {
     NautilusLabelCell *self = g_object_new (NAUTILUS_TYPE_LABEL_CELL,
                                             "view", view,

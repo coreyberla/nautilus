@@ -17,8 +17,15 @@ G_BEGIN_DECLS
 
 G_DECLARE_FINAL_TYPE (NautilusLabelCell, nautilus_label_cell, NAUTILUS, LABEL_CELL, NautilusViewCell)
 
-NautilusViewCell * nautilus_label_cell_new (NautilusListBase *view,
-                                            NautilusColumn   *column,
-                                            int              *column_width);
+/* Width of a label column, fitted to the widest text its cells have shown. */
+typedef struct _NautilusColumnWidth NautilusColumnWidth;
+
+NautilusColumnWidth * nautilus_column_width_new   (void);
+void                  nautilus_column_width_unref (NautilusColumnWidth *self);
+void                  nautilus_column_width_reset (NautilusColumnWidth *self);
+
+NautilusViewCell * nautilus_label_cell_new (NautilusListBase    *view,
+                                            NautilusColumn      *column,
+                                            NautilusColumnWidth *column_width);
 
 G_END_DECLS

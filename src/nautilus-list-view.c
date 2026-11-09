@@ -563,7 +563,8 @@ update_sort_directories_first (NautilusListView *self)
 
 /* Label columns only grow to fit the widest text seen. Start over for a new
  * directory, so they can shrink again. The view is empty at this point, so no
- * cell is left measured against the old width. */
+ * cell is left measured against the old width. This also drops cached text
+ * widths, which would otherwise go stale if the font changed. */
 static void
 reset_label_column_widths (NautilusListView *self)
 {
@@ -573,11 +574,11 @@ reset_label_column_widths (NautilusListView *self)
     g_hash_table_iter_init (&iter, self->factory_to_column_map);
     while (g_hash_table_iter_next (&iter, &factory, NULL))
     {
-        int *column_width = g_object_get_data (factory, "column-width");
+        NautilusColumnWidth *column_width = g_object_get_data (factory, "column-width");
 
         if (column_width != NULL)
         {
-            *column_width = 0;
+            nautilus_column_width_reset (column_width);
         }
     }
 }
@@ -1061,7 +1062,8 @@ setup_view_columns (NautilusListView *self)
         else
         {
             g_object_set_data_full (G_OBJECT (factory), "column-width",
-                                    g_rc_box_new0 (int), g_rc_box_release);
+                                    nautilus_column_width_new (),
+                                    (GDestroyNotify) nautilus_column_width_unref);
             g_signal_connect (factory, "setup", G_CALLBACK (setup_label_cell), self);
         }
 
