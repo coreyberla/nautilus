@@ -216,6 +216,7 @@ struct _NautilusFilesView
 
     /* Empty states */
     GtkWidget *empty_view_page;
+    GtkWidget *loading_spinner;
 
     /* Floating bar */
     guint floating_bar_set_status_timeout_id;
@@ -344,6 +345,8 @@ remove_loading_floating_bar (NautilusFilesView *self)
     }
 
     gtk_widget_set_visible (self->floating_bar, FALSE);
+    gtk_widget_set_visible (self->loading_spinner, FALSE);
+    gtk_widget_remove_css_class (GTK_WIDGET (self), "loading-folder");
     nautilus_floating_bar_set_show_stop (NAUTILUS_FLOATING_BAR (self->floating_bar), FALSE);
 }
 
@@ -356,6 +359,14 @@ real_setup_loading_floating_bar (NautilusFilesView *self)
     nautilus_floating_bar_set_show_stop (NAUTILUS_FLOATING_BAR (self->floating_bar), self->loading);
 
     gtk_widget_set_visible (self->floating_bar, TRUE);
+
+    /* Search results stream in, so don't dim them while searching. */
+    if (self->loading && !nautilus_files_view_is_searching (self))
+    {
+        /* Dims the view items, but not the list view column headers. */
+        gtk_widget_add_css_class (GTK_WIDGET (self), "loading-folder");
+        gtk_widget_set_visible (self->loading_spinner, TRUE);
+    }
 }
 
 static void
@@ -3205,6 +3216,7 @@ connect_inner_view (NautilusFilesView *self)
     }
 
     nautilus_list_base_add_overlay (self->list_base, self->empty_view_page);
+    nautilus_list_base_add_overlay (self->list_base, self->loading_spinner);
 }
 
 static void
@@ -3314,6 +3326,7 @@ nautilus_files_view_finalize (GObject *object)
     NautilusFilesView *self = NAUTILUS_FILES_VIEW (object);
 
     g_clear_object (&self->empty_view_page);
+    g_clear_object (&self->loading_spinner);
     g_clear_object (&self->view_action_group);
     g_clear_object (&self->background_menu_model);
     g_clear_object (&self->selection_menu_model);
@@ -9448,6 +9461,16 @@ nautilus_files_view_init (NautilusFilesView *self)
     /* Ensure opaque background, to hide the view underneath it. */
     gtk_widget_add_css_class (self->empty_view_page, "view");
 
+    /* Shown over the view while a folder is loading. Like the empty page,
+     * owned by us so it survives view mode switches. Input passes through
+     * to the view underneath. */
+    self->loading_spinner = g_object_ref_sink (adw_spinner_new ());
+    gtk_widget_set_halign (self->loading_spinner, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign (self->loading_spinner, GTK_ALIGN_CENTER);
+    gtk_widget_set_size_request (self->loading_spinner, 32, 32);
+    gtk_widget_set_can_target (self->loading_spinner, FALSE);
+    gtk_widget_set_visible (self->loading_spinner, FALSE);
+
     g_signal_connect (self,
                       "notify::selection",
                       G_CALLBACK (nautilus_files_view_preview_update),
@@ -9719,6 +9742,7 @@ nautilus_files_view_change (NautilusFilesView *self,
 {
     /* Prepare empty page for reuse. It's not destroyed because we own it. */
     gtk_widget_unparent (self->empty_view_page);
+    gtk_widget_unparent (self->loading_spinner);
 
     /* Avoid subfolder items showing up in grid view. */
     nautilus_view_model_expand_as_a_tree (self->model, FALSE);

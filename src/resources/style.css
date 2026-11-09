@@ -389,3 +389,9 @@ rubberband {
 .toolbar.no-bottom-padding {
   padding-bottom: 0px;
 }
+
+/* Dim the items, but not the column headers, while a folder is loading. */
+.loading-folder .nautilus-list-view columnview > listview > row,
+.loading-folder .nautilus-grid-view gridview > child {
+  opacity: 0.5;
+}
