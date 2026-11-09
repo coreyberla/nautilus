@@ -22,9 +22,13 @@ struct _NautilusLabelCell
     NautilusColumn *column;
     GQuark attribute_q;
 
-    GtkLabel *label;
+    GtkInscription *inscription;
+    PangoLayout *measure_layout;
 
-    gboolean show_snippet;
+    /* Width shared by all cells of this column in a view (refcounted with
+     * g_rc_box). It only grows, so it is the widest text seen so far. */
+    int *column_width;
+    gboolean needs_measure;
 };
 
 G_DEFINE_FINAL_TYPE (NautilusLabelCell, nautilus_label_cell, NAUTILUS_TYPE_VIEW_CELL)
@@ -39,6 +43,37 @@ enum
 static GParamSpec *properties[N_PROPS] = { NULL, };
 
 static void
+measure_text (NautilusLabelCell *self)
+{
+    const char *text = gtk_inscription_get_text (self->inscription);
+    int width;
+
+    self->needs_measure = FALSE;
+
+    if (text == NULL || *text == '\0')
+    {
+        return;
+    }
+
+    if (self->measure_layout == NULL)
+    {
+        self->measure_layout = pango_layout_new (gtk_widget_get_pango_context (GTK_WIDGET (self->inscription)));
+        pango_layout_set_attributes (self->measure_layout,
+                                     gtk_inscription_get_attributes (self->inscription));
+    }
+
+    pango_layout_set_text (self->measure_layout, text, -1);
+    pango_layout_get_pixel_size (self->measure_layout, &width, NULL);
+
+    /* Only grow, so a resize is queued only when a new widest text shows up. */
+    if (width > *self->column_width)
+    {
+        *self->column_width = width;
+        gtk_widget_queue_resize (GTK_WIDGET (self));
+    }
+}
+
+static void
 update_label (NautilusLabelCell *self)
 {
     g_autoptr (NautilusViewItem) item = NULL;
@@ -50,7 +85,81 @@ update_label (NautilusLabelCell *self)
     file = nautilus_view_item_get_file (item);
 
     string = nautilus_file_get_string_attribute_q (file, self->attribute_q);
-    gtk_label_set_text (self->label, string);
+
+    /* Unlike GtkLabel, this doesn't queue a resize: rebinding while scrolling
+     * doesn't relayout the column. */
+    gtk_inscription_set_text (self->inscription, string);
+
+    /* Cells of hidden columns are bound too, but not mapped; don't spend time
+     * measuring them until they are shown. */
+    self->needs_measure = TRUE;
+    if (gtk_widget_get_mapped (GTK_WIDGET (self)))
+    {
+        measure_text (self);
+    }
+}
+
+static void
+on_file_changed (NautilusLabelCell *self)
+{
+    g_autoptr (NautilusViewItem) item = nautilus_view_cell_get_item (NAUTILUS_VIEW_CELL (self));
+    g_autofree gchar *string = NULL;
+
+    /* "file-changed" is emitted for any attribute (e.g. thumbnails), so avoid
+     * measuring again when this column's text stays the same. Not done on bind,
+     * where the column width may have been reset. */
+    string = nautilus_file_get_string_attribute_q (nautilus_view_item_get_file (item),
+                                                   self->attribute_q);
+    if (g_strcmp0 (string, gtk_inscription_get_text (self->inscription)) != 0)
+    {
+        update_label (self);
+    }
+}
+
+static void
+nautilus_label_cell_map (GtkWidget *widget)
+{
+    NautilusLabelCell *self = NAUTILUS_LABEL_CELL (widget);
+
+    GTK_WIDGET_CLASS (nautilus_label_cell_parent_class)->map (widget);
+
+    if (self->needs_measure)
+    {
+        measure_text (self);
+    }
+}
+
+static void
+nautilus_label_cell_measure (GtkWidget      *widget,
+                             GtkOrientation  orientation,
+                             int             for_size,
+                             int            *minimum,
+                             int            *natural,
+                             int            *minimum_baseline,
+                             int            *natural_baseline)
+{
+    NautilusLabelCell *self = NAUTILUS_LABEL_CELL (widget);
+
+    if (orientation == GTK_ORIENTATION_HORIZONTAL)
+    {
+        *minimum = *natural = *self->column_width;
+    }
+    else
+    {
+        gtk_widget_measure (GTK_WIDGET (self->inscription), orientation, for_size,
+                            minimum, natural, minimum_baseline, natural_baseline);
+    }
+}
+
+static void
+nautilus_label_cell_size_allocate (GtkWidget *widget,
+                                   int        width,
+                                   int        height,
+                                   int        baseline)
+{
+    NautilusLabelCell *self = NAUTILUS_LABEL_CELL (widget);
+
+    gtk_widget_allocate (GTK_WIDGET (self->inscription), width, height, baseline, NULL);
 }
 
 static void
@@ -81,16 +190,19 @@ nautilus_label_cell_init (NautilusLabelCell *self)
 {
     GtkWidget *child;
 
-    child = gtk_label_new (NULL);
+    child = gtk_inscription_new (NULL);
     gtk_widget_set_parent (child, GTK_WIDGET (self));
-    gtk_widget_set_valign (child, GTK_ALIGN_CENTER);
     gtk_widget_add_css_class (child, "dimmed");
-    self->label = GTK_LABEL (child);
+    /* Width comes from our own measurement, not from character counts. */
+    gtk_inscription_set_min_chars (GTK_INSCRIPTION (child), 0);
+    /* Only reached if the user shrinks the column. */
+    gtk_inscription_set_text_overflow (GTK_INSCRIPTION (child), GTK_INSCRIPTION_OVERFLOW_ELLIPSIZE_END);
+    self->inscription = GTK_INSCRIPTION (child);
 
     /* Connect automatically to an item. */
     self->item_signal_group = g_signal_group_new (NAUTILUS_TYPE_VIEW_ITEM);
     g_signal_group_connect_swapped (self->item_signal_group, "file-changed",
-                                    G_CALLBACK (update_label), self);
+                                    G_CALLBACK (on_file_changed), self);
     g_signal_connect_object (self->item_signal_group, "bind",
                              G_CALLBACK (update_label), self,
                              G_CONNECT_SWAPPED);
@@ -113,7 +225,7 @@ nautilus_label_cell_constructed (GObject *object)
                   "name", &column_name,
                   "xalign", &xalign,
                   NULL);
-    gtk_label_set_xalign (self->label, xalign);
+    gtk_inscription_set_xalign (self->inscription, xalign);
 
     if (nautilus_file_is_date_sort_attribute_q (self->attribute_q))
     {
@@ -124,11 +236,17 @@ nautilus_label_cell_constructed (GObject *object)
 
     if (g_strcmp0 (column_name, "permissions") == 0)
     {
-        gtk_widget_add_css_class (GTK_WIDGET (self->label), "monospace");
+        /* Font family is part of the pango context, so measurement sees it. */
+        gtk_widget_add_css_class (GTK_WIDGET (self->inscription), "monospace");
     }
     else
     {
-        gtk_widget_add_css_class (GTK_WIDGET (self->label), "numeric");
+        /* Same as the "numeric" style class, but as an attribute instead of
+         * CSS so that the measurement layout can share it. */
+        g_autoptr (PangoAttrList) attrs = pango_attr_list_new ();
+
+        pango_attr_list_insert (attrs, pango_attr_font_features_new ("tnum=1"));
+        gtk_inscription_set_attributes (self->inscription, attrs);
     }
 }
 
@@ -138,12 +256,23 @@ nautilus_label_cell_dispose (GObject *object)
     NautilusLabelCell *self = (NautilusLabelCell *) object;
 
     g_clear_object (&self->item_signal_group);
-    if (self->label)
+    g_clear_object (&self->measure_layout);
+    if (self->inscription)
     {
-        gtk_widget_unparent (GTK_WIDGET (self->label));
-        self->label = NULL;
+        gtk_widget_unparent (GTK_WIDGET (self->inscription));
+        self->inscription = NULL;
     }
     G_OBJECT_CLASS (nautilus_label_cell_parent_class)->dispose (object);
+}
+
+static void
+nautilus_label_cell_finalize (GObject *object)
+{
+    NautilusLabelCell *self = (NautilusLabelCell *) object;
+
+    g_rc_box_release (self->column_width);
+
+    G_OBJECT_CLASS (nautilus_label_cell_parent_class)->finalize (object);
 }
 
 static void
@@ -155,6 +284,11 @@ nautilus_label_cell_class_init (NautilusLabelCellClass *klass)
     object_class->set_property = nautilus_label_cell_set_property;
     object_class->constructed = nautilus_label_cell_constructed;
     object_class->dispose = nautilus_label_cell_dispose;
+    object_class->finalize = nautilus_label_cell_finalize;
+
+    widget_class->map = nautilus_label_cell_map;
+    widget_class->measure = nautilus_label_cell_measure;
+    widget_class->size_allocate = nautilus_label_cell_size_allocate;
 
     properties[PROP_COLUMN] = g_param_spec_object ("column",
                                                    "", "",
@@ -162,16 +296,24 @@ nautilus_label_cell_class_init (NautilusLabelCellClass *klass)
                                                    G_PARAM_WRITABLE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_STRINGS);
 
     g_object_class_install_properties (object_class, N_PROPS, properties);
-
-    gtk_widget_class_set_layout_manager_type (widget_class, GTK_TYPE_BIN_LAYOUT);
 }
 
+/**
+ * nautilus_label_cell_new:
+ * @column_width: a g_rc_box() int shared by all cells of the column, which
+ *   the view resets to 0 when it loads a new directory.
+ */
 NautilusViewCell *
 nautilus_label_cell_new (NautilusListBase *view,
-                         NautilusColumn   *column)
+                         NautilusColumn   *column,
+                         int              *column_width)
 {
-    return NAUTILUS_VIEW_CELL (g_object_new (NAUTILUS_TYPE_LABEL_CELL,
-                                             "view", view,
-                                             "column", column,
-                                             NULL));
+    NautilusLabelCell *self = g_object_new (NAUTILUS_TYPE_LABEL_CELL,
+                                            "view", view,
+                                            "column", column,
+                                            NULL);
+
+    self->column_width = g_rc_box_acquire (column_width);
+
+    return NAUTILUS_VIEW_CELL (self);
 }

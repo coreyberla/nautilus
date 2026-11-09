@@ -561,6 +561,27 @@ update_sort_directories_first (NautilusListView *self)
     }
 }
 
+/* Label columns only grow to fit the widest text seen. Start over for a new
+ * directory, so they can shrink again. The view is empty at this point, so no
+ * cell is left measured against the old width. */
+static void
+reset_label_column_widths (NautilusListView *self)
+{
+    GHashTableIter iter;
+    gpointer factory;
+
+    g_hash_table_iter_init (&iter, self->factory_to_column_map);
+    while (g_hash_table_iter_next (&iter, &factory, NULL))
+    {
+        int *column_width = g_object_get_data (factory, "column-width");
+
+        if (column_width != NULL)
+        {
+            *column_width = 0;
+        }
+    }
+}
+
 static void
 nautilus_list_view_setup_directory (NautilusListBase  *list_base,
                                     NautilusDirectory *new_directory)
@@ -578,6 +599,8 @@ nautilus_list_view_setup_directory (NautilusListBase  *list_base,
     }
 
     update_columns_settings_from_metadata_and_preferences (self);
+
+    reset_label_column_widths (self);
 
     self->expand_as_a_tree = g_settings_get_boolean (nautilus_list_view_preferences,
                                                      NAUTILUS_PREFERENCES_LIST_VIEW_USE_TREE);
@@ -971,7 +994,8 @@ setup_label_cell (GtkSignalListItemFactory *factory,
 
     nautilus_column = g_hash_table_lookup (self->factory_to_column_map, factory);
 
-    cell = nautilus_label_cell_new (NAUTILUS_LIST_BASE (user_data), nautilus_column);
+    cell = nautilus_label_cell_new (NAUTILUS_LIST_BASE (user_data), nautilus_column,
+                                    g_object_get_data (G_OBJECT (factory), "column-width"));
     gtk_column_view_cell_set_child (listitem, GTK_WIDGET (cell));
     setup_cell_common (G_OBJECT (listitem), cell, GTK_WIDGET (cell));
 }
@@ -1036,6 +1060,8 @@ setup_view_columns (NautilusListView *self)
         }
         else
         {
+            g_object_set_data_full (G_OBJECT (factory), "column-width",
+                                    g_rc_box_new0 (int), g_rc_box_release);
             g_signal_connect (factory, "setup", G_CALLBACK (setup_label_cell), self);
         }
 

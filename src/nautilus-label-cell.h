@@ -18,6 +18,7 @@ G_BEGIN_DECLS
 G_DECLARE_FINAL_TYPE (NautilusLabelCell, nautilus_label_cell, NAUTILUS, LABEL_CELL, NautilusViewCell)
 
 NautilusViewCell * nautilus_label_cell_new (NautilusListBase *view,
-                                            NautilusColumn   *column);
+                                            NautilusColumn   *column,
+                                            int              *column_width);
 
 G_END_DECLS
