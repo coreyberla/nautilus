@@ -104,8 +104,6 @@ void              nautilus_files_view_activate_selection         (NautilusFilesV
 void              nautilus_files_view_preview_selection_event    (NautilusFilesView      *view,
                                                                   GtkDirectionType        direction);
 void              nautilus_files_view_stop_loading               (NautilusFilesView      *view);
-void              nautilus_files_view_begin_location_change      (NautilusFilesView      *view);
-void              nautilus_files_view_end_location_change        (NautilusFilesView      *view);
 
 /* testing-only */
 NautilusViewModel *

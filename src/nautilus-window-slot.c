@@ -1504,13 +1504,6 @@ begin_location_change (NautilusWindowSlot *self,
 
     nautilus_window_slot_set_allow_stop (self, TRUE);
 
-    if (self->content_view != NULL)
-    {
-        /* Start the loading indication delay now, so that it includes the time
-         * taken to get the new location's info, which can be slow. */
-        nautilus_files_view_begin_location_change (self->content_view);
-    }
-
     g_assert (self->pending_location == NULL);
     g_assert (self->pending_file == NULL);
 
@@ -2066,11 +2059,6 @@ free_location_change (NautilusWindowSlot *self)
     self->location_change_distance = 0;
     nautilus_file_list_free (self->pending_selection);
     self->pending_selection = NULL;
-
-    if (self->content_view != NULL)
-    {
-        nautilus_files_view_end_location_change (self->content_view);
-    }
 
     if (self->mount_cancellable != NULL)
     {
@@ -2793,7 +2781,6 @@ nautilus_window_slot_stop_loading (NautilusWindowSlot *self)
     if (self->content_view != NULL)
     {
         nautilus_files_view_stop_loading (self->content_view);
-        nautilus_files_view_end_location_change (self->content_view);
     }
 
     if (self->pending_location != NULL &&
