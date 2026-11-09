@@ -87,10 +87,6 @@
 /* Delay to show the Loading... floating bar */
 #define FLOATING_BAR_LOADING_DELAY 200 /* ms */
 
-/* Delay loading to avoid flashing of blank page fore each folder load.
- * Especially useful during frequent changes such as typing during a search. */
-#define TRANSITION_TIMEOUT 200 /* ms */
-
 #define MIN_COMMON_FILENAME_PREFIX_LENGTH 4
 
 enum
@@ -157,7 +153,12 @@ struct _NautilusFilesView
     guint update_context_menus_timeout_id;
     guint update_status_idle_id;
 
-    guint transition_timeout_id;
+    /* The previous location's items are kept until the new location has
+     * files to display, or loading ends. */
+    gboolean transition_pending;
+    /* Set while load_directory() stops the previous load, so that the items
+     * are kept for the transition to the new load. */
+    gboolean restarting_load;
     gboolean begin_loading_delayed;
 
     guint display_pending_source_id;
@@ -3263,7 +3264,7 @@ nautilus_files_view_dispose (GObject *object)
     remove_update_context_menus_timeout_callback (self);
     remove_update_status_idle_callback (self);
 
-    g_clear_handle_id (&self->transition_timeout_id, g_source_remove);
+    self->transition_pending = FALSE;
 
     if (self->display_selection_idle_id != 0)
     {
@@ -3791,7 +3792,19 @@ done_loading (NautilusFilesView *self,
     }
 
     self->loading = FALSE;
-    g_clear_handle_id (&self->transition_timeout_id, g_source_remove);
+
+    if (self->in_destruction)
+    {
+        self->transition_pending = FALSE;
+    }
+    else if (!self->restarting_load)
+    {
+        /* Loading stopped (cancelled, failed or interrupted by a new load)
+         * before any files were displayed. Don't leave the previous
+         * location's items in the view. */
+        transition_emit_delayed_signals_if_pending (self);
+    }
+
     g_signal_emit (self, signals[END_LOADING], 0, all_files_seen);
     g_object_notify_by_pspec (G_OBJECT (self), properties[PROP_LOADING]);
 
@@ -8435,7 +8448,7 @@ files_view_clear (NautilusFilesView *self)
 static void
 emit_begin_loading (NautilusFilesView *self)
 {
-    if (self->transition_timeout_id != 0)
+    if (self->transition_pending)
     {
         /* Mark it to be emitted later, as we haven't cleared old contents yet. */
         self->begin_loading_delayed = TRUE;
@@ -8452,7 +8465,7 @@ emit_begin_loading (NautilusFilesView *self)
 static void
 transition_emit_delayed_signals (NautilusFilesView *self)
 {
-    self->transition_timeout_id = 0;
+    self->transition_pending = FALSE;
 
     g_signal_emit (self, signals[CLEAR], 0);
 
@@ -8465,9 +8478,8 @@ transition_emit_delayed_signals (NautilusFilesView *self)
 static void
 transition_emit_delayed_signals_if_pending (NautilusFilesView *self)
 {
-    if (self->transition_timeout_id != 0)
+    if (self->transition_pending)
     {
-        g_clear_handle_id (&self->transition_timeout_id, g_source_remove);
         transition_emit_delayed_signals (self);
     }
 }
@@ -8490,18 +8502,16 @@ load_directory (NautilusFilesView *self,
     g_assert (NAUTILUS_IS_FILES_VIEW (self));
     g_assert (NAUTILUS_IS_DIRECTORY (directory));
 
+    self->restarting_load = TRUE;
     nautilus_files_view_stop_loading (self);
+    self->restarting_load = FALSE;
 
-    /* To make navigation feel fast and smooth, avoid blanking the view temporarily.
+    /* To make navigation feel fast and smooth, avoid blanking the view.
+     * Keep showing the previous items (dimmed, once loading takes long enough)
+     * until the new location has files to display.
      * This especially helps when transitioning to search results.
      */
-    if (self->transition_timeout_id == 0)
-    {
-        self->transition_timeout_id =
-            g_timeout_add_once (TRANSITION_TIMEOUT,
-                                (GSourceOnceFunc) transition_emit_delayed_signals,
-                                self);
-    }
+    self->transition_pending = TRUE;
 
     self->loading = TRUE;
 
