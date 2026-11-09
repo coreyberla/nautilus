@@ -298,8 +298,14 @@ apply_columns_settings (NautilusListView  *self,
         g_autoptr (GtkColumnViewColumn) view_column = NULL;
 
         view_column = g_list_model_get_item (old_view_columns, i);
-        gtk_column_view_column_set_visible (view_column,
-                                            g_list_find (view_columns, view_column) != NULL);
+        if (g_list_find (view_columns, view_column) == NULL)
+        {
+            gtk_column_view_column_set_visible (view_column, FALSE);
+        }
+        else
+        {
+            gtk_column_view_column_set_visible (view_column, TRUE);
+        }
     }
 
     /* Columns being shown haven't measured their cells yet. */
