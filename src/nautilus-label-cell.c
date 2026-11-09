@@ -131,21 +131,6 @@ update_label (NautilusLabelCell *self)
 }
 
 static void
-on_file_changed (NautilusLabelCell *self)
-{
-    g_autoptr (NautilusViewItem) item = nautilus_view_cell_get_item (NAUTILUS_VIEW_CELL (self));
-    g_autofree gchar *string = NULL;
-
-    /* Emitted for any attribute. */
-    string = nautilus_file_get_string_attribute_q (nautilus_view_item_get_file (item),
-                                                   self->attribute_q);
-    if (g_strcmp0 (string, gtk_inscription_get_text (self->inscription)) != 0)
-    {
-        update_label (self);
-    }
-}
-
-static void
 on_unbind (NautilusLabelCell *self)
 {
     self->text_width = 0;
@@ -225,7 +210,7 @@ nautilus_label_cell_init (NautilusLabelCell *self)
     /* Connect automatically to an item. */
     self->item_signal_group = g_signal_group_new (NAUTILUS_TYPE_VIEW_ITEM);
     g_signal_group_connect_swapped (self->item_signal_group, "file-changed",
-                                    G_CALLBACK (on_file_changed), self);
+                                    G_CALLBACK (update_label), self);
     g_signal_connect_object (self->item_signal_group, "bind",
                              G_CALLBACK (update_label), self,
                              G_CONNECT_SWAPPED);
