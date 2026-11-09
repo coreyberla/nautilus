@@ -563,7 +563,7 @@ update_sort_directories_first (NautilusListView *self)
     }
 }
 
-/* The view is empty by now, so no cell keeps the old width. */
+/* Cached text widths go stale if the font changes. */
 static void
 reset_label_column_widths (NautilusListView *self)
 {

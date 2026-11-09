@@ -27,25 +27,19 @@ struct _NautilusLabelCell
 
     NautilusColumnWidth *column_width;
     int text_width;
-    gboolean needs_measure;
     guint resize_tick_id;
 };
 
-/* Grows while scrolling, and shrinks to the cells on screen once it stops. */
+/* The widest text among the column's bound cells. */
 struct _NautilusColumnWidth
 {
-    int widest_text;
-    /* Lags widest_text until the column is resized for it, as cells wider than
-     * the column's cached width would overflow into the next column. */
     int width;
+    gboolean needs_update;
     GHashTable *text_widths;
     GHashTable *cells;
-    gint64 last_measure_time;
-    guint shrink_timeout_id;
 };
 
 #define MAX_CACHED_WIDTHS 10000
-#define SHRINK_DELAY_MS 500
 
 NautilusColumnWidth *
 nautilus_column_width_new (void)
@@ -61,7 +55,6 @@ nautilus_column_width_new (void)
 void
 nautilus_column_width_free (NautilusColumnWidth *self)
 {
-    g_clear_handle_id (&self->shrink_timeout_id, g_source_remove);
     g_hash_table_unref (self->text_widths);
     g_hash_table_unref (self->cells);
     g_free (self);
@@ -70,8 +63,6 @@ nautilus_column_width_free (NautilusColumnWidth *self)
 void
 nautilus_column_width_reset (NautilusColumnWidth *self)
 {
-    self->widest_text = 0;
-    self->width = 0;
     g_hash_table_remove_all (self->text_widths);
 }
 
@@ -86,146 +77,112 @@ enum
 
 static GParamSpec *properties[N_PROPS] = { NULL, };
 
-static void
-set_column_width (NautilusColumnWidth *self,
-                  int                  width)
+static gboolean
+update_column_width (GtkWidget     *widget,
+                     GdkFrameClock *frame_clock,
+                     gpointer       user_data)
 {
+    NautilusColumnWidth *column_width = NAUTILUS_LABEL_CELL (widget)->column_width;
     GHashTableIter iter;
     gpointer cell;
+    int width = 0;
 
-    self->width = width;
+    NAUTILUS_LABEL_CELL (widget)->resize_tick_id = 0;
 
-    /* Each cell caches what it reported, unmapped ones included, so a resize
-     * on one would only grow the column, never shrink it. */
-    g_hash_table_iter_init (&iter, self->cells);
-    while (g_hash_table_iter_next (&iter, &cell, NULL))
+    if (!column_width->needs_update)
     {
-        gtk_widget_queue_resize (cell);
-    }
-}
-
-static gboolean
-resize_column (GtkWidget     *widget,
-               GdkFrameClock *frame_clock,
-               gpointer       user_data)
-{
-    NautilusLabelCell *self = NAUTILUS_LABEL_CELL (widget);
-
-    self->resize_tick_id = 0;
-
-    if (self->column_width->widest_text > self->column_width->width)
-    {
-        g_printerr ("GROW %d -> %d\n", self->column_width->width, self->column_width->widest_text);
-        set_column_width (self->column_width, self->column_width->widest_text);
-    }
-
-    return G_SOURCE_REMOVE;
-}
-
-static gboolean
-shrink_to_cells_on_screen (gpointer user_data)
-{
-    NautilusColumnWidth *self = user_data;
-    gint64 idle_ms = (g_get_monotonic_time () - self->last_measure_time) / 1000;
-    GHashTableIter iter;
-    gpointer cell;
-    int needed = 0;
-
-    if (idle_ms < SHRINK_DELAY_MS)
-    {
-        g_printerr ("SHRINK POSTPONED, last measured %" G_GINT64_FORMAT " ms ago\n", idle_ms);
-        self->shrink_timeout_id = g_timeout_add (SHRINK_DELAY_MS - idle_ms,
-                                                 shrink_to_cells_on_screen, self);
         return G_SOURCE_REMOVE;
     }
+    column_width->needs_update = FALSE;
 
-    self->shrink_timeout_id = 0;
-
-    g_hash_table_iter_init (&iter, self->cells);
+    g_hash_table_iter_init (&iter, column_width->cells);
     while (g_hash_table_iter_next (&iter, &cell, NULL))
     {
-        if (gtk_widget_get_mapped (cell))
+        width = MAX (width, NAUTILUS_LABEL_CELL (cell)->text_width);
+    }
+
+    if (width != column_width->width)
+    {
+        column_width->width = width;
+
+        /* Each cell caches what it reported, so a resize on one would only
+         * grow the column, never shrink it. */
+        g_hash_table_iter_init (&iter, column_width->cells);
+        while (g_hash_table_iter_next (&iter, &cell, NULL))
         {
-            needed = MAX (needed, NAUTILUS_LABEL_CELL (cell)->text_width);
+            gtk_widget_queue_resize (cell);
         }
     }
 
-    g_printerr ("SHRINK CHECK width %d needed %d (%u cells)\n", self->width, needed, g_hash_table_size (self->cells));
-    if (needed > 0 && needed < self->width)
-    {
-        self->widest_text = needed;
-        set_column_width (self, needed);
-    }
-
     return G_SOURCE_REMOVE;
 }
 
 static void
-measure_text (NautilusLabelCell *self)
+set_text_width (NautilusLabelCell *self,
+                int                text_width)
 {
-    const char *text = gtk_inscription_get_text (self->inscription);
+    NautilusColumnWidth *column_width = self->column_width;
+    int old_text_width = self->text_width;
+
+    self->text_width = text_width;
+
+    if (text_width > column_width->width ||
+        (old_text_width == column_width->width && text_width < old_text_width))
+    {
+        column_width->needs_update = TRUE;
+    }
+
+    /* Binding can happen during layout, where a resize may be dropped. If this
+     * cell goes away before the tick, the next one to change retries. */
+    if (column_width->needs_update && self->resize_tick_id == 0)
+    {
+        self->resize_tick_id = gtk_widget_add_tick_callback (GTK_WIDGET (self),
+                                                             update_column_width,
+                                                             NULL, NULL);
+    }
+}
+
+static int
+measure_text (NautilusLabelCell *self,
+              const char        *text)
+{
     gpointer cached_width;
     int width;
 
-    self->needs_measure = FALSE;
-    self->text_width = 0;
-
-    self->column_width->last_measure_time = g_get_monotonic_time ();
-    if (self->column_width->shrink_timeout_id == 0)
-    {
-        self->column_width->shrink_timeout_id = g_timeout_add (SHRINK_DELAY_MS,
-                                                               shrink_to_cells_on_screen,
-                                                               self->column_width);
-    }
-
     if (text == NULL || *text == '\0')
     {
-        return;
+        return 0;
     }
 
     if (g_hash_table_lookup_extended (self->column_width->text_widths, text,
                                       NULL, &cached_width))
     {
-        width = GPOINTER_TO_INT (cached_width);
+        return GPOINTER_TO_INT (cached_width);
     }
-    else
+
+    if (self->measure_layout == NULL)
     {
-        if (self->measure_layout == NULL)
-        {
-            self->measure_layout = pango_layout_new (gtk_widget_get_pango_context (GTK_WIDGET (self->inscription)));
-            pango_layout_set_attributes (self->measure_layout,
-                                         gtk_inscription_get_attributes (self->inscription));
-        }
-
-        pango_layout_set_text (self->measure_layout, text, -1);
-        pango_layout_get_pixel_size (self->measure_layout, &width, NULL);
-
-        if (g_hash_table_size (self->column_width->text_widths) >= MAX_CACHED_WIDTHS)
-        {
-            g_hash_table_remove_all (self->column_width->text_widths);
-        }
-        g_hash_table_insert (self->column_width->text_widths,
-                             g_strdup (text), GINT_TO_POINTER (width));
+        self->measure_layout = pango_layout_new (gtk_widget_get_pango_context (GTK_WIDGET (self->inscription)));
+        pango_layout_set_attributes (self->measure_layout,
+                                     gtk_inscription_get_attributes (self->inscription));
     }
 
-    self->text_width = width;
+    pango_layout_set_text (self->measure_layout, text, -1);
+    pango_layout_get_pixel_size (self->measure_layout, &width, NULL);
 
-    self->column_width->widest_text = MAX (self->column_width->widest_text, width);
-
-    /* Bind and map can happen during layout, where a resize may be dropped.
-     * If this cell goes away before the tick, the next measurement retries. */
-    if (self->column_width->widest_text > self->column_width->width &&
-        self->resize_tick_id == 0)
+    if (g_hash_table_size (self->column_width->text_widths) >= MAX_CACHED_WIDTHS)
     {
-        self->resize_tick_id = gtk_widget_add_tick_callback (GTK_WIDGET (self),
-                                                             resize_column, NULL, NULL);
+        g_hash_table_remove_all (self->column_width->text_widths);
     }
+    g_hash_table_insert (self->column_width->text_widths,
+                         g_strdup (text), GINT_TO_POINTER (width));
+
+    return width;
 }
 
 static void
 update_label (NautilusLabelCell *self)
 {
-    g_printerr ("UPDATE %s\n", g_quark_to_string (self->attribute_q));
     g_autoptr (NautilusViewItem) item = NULL;
     NautilusFile *file;
     g_autofree gchar *string = NULL;
@@ -238,13 +195,7 @@ update_label (NautilusLabelCell *self)
 
     /* Unlike GtkLabel, doesn't queue a resize. */
     gtk_inscription_set_text (self->inscription, string);
-
-    /* Cells of hidden columns are bound too, but not mapped. */
-    self->needs_measure = TRUE;
-    if (gtk_widget_get_mapped (GTK_WIDGET (self)))
-    {
-        measure_text (self);
-    }
+    set_text_width (self, measure_text (self, string));
 }
 
 static void
@@ -253,8 +204,7 @@ on_file_changed (NautilusLabelCell *self)
     g_autoptr (NautilusViewItem) item = nautilus_view_cell_get_item (NAUTILUS_VIEW_CELL (self));
     g_autofree gchar *string = NULL;
 
-    /* Emitted for any attribute. Not checked on bind, where the column width
-     * may have been reset. */
+    /* Emitted for any attribute. */
     string = nautilus_file_get_string_attribute_q (nautilus_view_item_get_file (item),
                                                    self->attribute_q);
     if (g_strcmp0 (string, gtk_inscription_get_text (self->inscription)) != 0)
@@ -264,16 +214,9 @@ on_file_changed (NautilusLabelCell *self)
 }
 
 static void
-nautilus_label_cell_map (GtkWidget *widget)
+on_unbind (NautilusLabelCell *self)
 {
-    NautilusLabelCell *self = NAUTILUS_LABEL_CELL (widget);
-
-    GTK_WIDGET_CLASS (nautilus_label_cell_parent_class)->map (widget);
-
-    if (self->needs_measure)
-    {
-        measure_text (self);
-    }
+    set_text_width (self, 0);
 }
 
 static void
@@ -351,6 +294,9 @@ nautilus_label_cell_init (NautilusLabelCell *self)
     g_signal_connect_object (self->item_signal_group, "bind",
                              G_CALLBACK (update_label), self,
                              G_CONNECT_SWAPPED);
+    g_signal_connect_object (self->item_signal_group, "unbind",
+                             G_CALLBACK (on_unbind), self,
+                             G_CONNECT_SWAPPED);
     g_object_bind_property (self, "item",
                             self->item_signal_group, "target",
                             G_BINDING_SYNC_CREATE);
@@ -423,7 +369,6 @@ nautilus_label_cell_class_init (NautilusLabelCellClass *klass)
     object_class->constructed = nautilus_label_cell_constructed;
     object_class->dispose = nautilus_label_cell_dispose;
 
-    widget_class->map = nautilus_label_cell_map;
     widget_class->measure = nautilus_label_cell_measure;
     widget_class->size_allocate = nautilus_label_cell_size_allocate;
 
