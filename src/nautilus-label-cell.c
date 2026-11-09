@@ -37,11 +37,8 @@ struct _NautilusColumnWidth
     int width;
     gboolean visible;
     gboolean needs_update;
-    GHashTable *text_widths;
-    GHashTable *cells;
+    GPtrArray *cells;
 };
-
-#define MAX_CACHED_WIDTHS 10000
 
 NautilusColumnWidth *
 nautilus_column_width_new (void)
@@ -49,8 +46,7 @@ nautilus_column_width_new (void)
     NautilusColumnWidth *self = g_new0 (NautilusColumnWidth, 1);
 
     self->visible = TRUE;
-    self->text_widths = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
-    self->cells = g_hash_table_new (NULL, NULL);
+    self->cells = g_ptr_array_new ();
 
     return self;
 }
@@ -58,15 +54,8 @@ nautilus_column_width_new (void)
 void
 nautilus_column_width_free (NautilusColumnWidth *self)
 {
-    g_hash_table_unref (self->text_widths);
-    g_hash_table_unref (self->cells);
+    g_ptr_array_unref (self->cells);
     g_free (self);
-}
-
-void
-nautilus_column_width_reset (NautilusColumnWidth *self)
-{
-    g_hash_table_remove_all (self->text_widths);
 }
 
 G_DEFINE_FINAL_TYPE (NautilusLabelCell, nautilus_label_cell, NAUTILUS_TYPE_VIEW_CELL)
@@ -86,8 +75,6 @@ update_column_width (GtkWidget     *widget,
                      gpointer       user_data)
 {
     NautilusColumnWidth *column_width = NAUTILUS_LABEL_CELL (widget)->column_width;
-    GHashTableIter iter;
-    gpointer cell;
     int width = 0;
 
     NAUTILUS_LABEL_CELL (widget)->resize_tick_id = 0;
@@ -98,10 +85,9 @@ update_column_width (GtkWidget     *widget,
     }
     column_width->needs_update = FALSE;
 
-    g_hash_table_iter_init (&iter, column_width->cells);
-    while (g_hash_table_iter_next (&iter, &cell, NULL))
+    for (guint i = 0; i < column_width->cells->len; i++)
     {
-        width = MAX (width, NAUTILUS_LABEL_CELL (cell)->text_width);
+        width = MAX (width, NAUTILUS_LABEL_CELL (g_ptr_array_index (column_width->cells, i))->text_width);
     }
 
     if (width != column_width->width)
@@ -110,10 +96,9 @@ update_column_width (GtkWidget     *widget,
 
         /* Each cell caches what it reported, so a resize on one would only
          * grow the column, never shrink it. */
-        g_hash_table_iter_init (&iter, column_width->cells);
-        while (g_hash_table_iter_next (&iter, &cell, NULL))
+        for (guint i = 0; i < column_width->cells->len; i++)
         {
-            gtk_widget_queue_resize (cell);
+            gtk_widget_queue_resize (g_ptr_array_index (column_width->cells, i));
         }
     }
 
@@ -149,18 +134,11 @@ static int
 measure_text (NautilusLabelCell *self,
               const char        *text)
 {
-    gpointer cached_width;
     int width;
 
     if (text == NULL || *text == '\0')
     {
         return 0;
-    }
-
-    if (g_hash_table_lookup_extended (self->column_width->text_widths, text,
-                                      NULL, &cached_width))
-    {
-        return GPOINTER_TO_INT (cached_width);
     }
 
     if (self->measure_layout == NULL)
@@ -172,13 +150,6 @@ measure_text (NautilusLabelCell *self,
 
     pango_layout_set_text (self->measure_layout, text, -1);
     pango_layout_get_pixel_size (self->measure_layout, &width, NULL);
-
-    if (g_hash_table_size (self->column_width->text_widths) >= MAX_CACHED_WIDTHS)
-    {
-        g_hash_table_remove_all (self->column_width->text_widths);
-    }
-    g_hash_table_insert (self->column_width->text_widths,
-                         g_strdup (text), GINT_TO_POINTER (width));
 
     return width;
 }
@@ -211,19 +182,15 @@ void
 nautilus_column_width_set_visible (NautilusColumnWidth *self,
                                    gboolean             visible)
 {
-    GHashTableIter iter;
-    gpointer cell;
-
     self->visible = visible;
     if (!visible)
     {
         return;
     }
 
-    g_hash_table_iter_init (&iter, self->cells);
-    while (g_hash_table_iter_next (&iter, &cell, NULL))
+    for (guint i = 0; i < self->cells->len; i++)
     {
-        NautilusLabelCell *label_cell = cell;
+        NautilusLabelCell *label_cell = g_ptr_array_index (self->cells, i);
 
         if (label_cell->needs_measure)
         {
@@ -386,7 +353,7 @@ nautilus_label_cell_dispose (GObject *object)
     g_clear_object (&self->measure_layout);
     if (self->column_width != NULL)
     {
-        g_hash_table_remove (self->column_width->cells, self);
+        g_ptr_array_remove_fast (self->column_width->cells, self);
     }
     if (self->inscription)
     {
@@ -428,7 +395,7 @@ nautilus_label_cell_new (NautilusListBase    *view,
                                             NULL);
 
     self->column_width = column_width;
-    g_hash_table_add (column_width->cells, self);
+    g_ptr_array_add (column_width->cells, self);
 
     return NAUTILUS_VIEW_CELL (self);
 }

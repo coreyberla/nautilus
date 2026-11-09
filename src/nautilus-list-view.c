@@ -566,16 +566,6 @@ update_sort_directories_first (NautilusListView *self)
     }
 }
 
-/* Cached text widths go stale if the font changes. */
-static void
-reset_label_column_widths (NautilusListView *self)
-{
-    for (guint i = 0; i < self->column_widths->len; i++)
-    {
-        nautilus_column_width_reset (g_ptr_array_index (self->column_widths, i));
-    }
-}
-
 static void
 nautilus_list_view_setup_directory (NautilusListBase  *list_base,
                                     NautilusDirectory *new_directory)
@@ -593,8 +583,6 @@ nautilus_list_view_setup_directory (NautilusListBase  *list_base,
     }
 
     update_columns_settings_from_metadata_and_preferences (self);
-
-    reset_label_column_widths (self);
 
     self->expand_as_a_tree = g_settings_get_boolean (nautilus_list_view_preferences,
                                                      NAUTILUS_PREFERENCES_LIST_VIEW_USE_TREE);

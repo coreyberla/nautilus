@@ -21,7 +21,6 @@ typedef struct _NautilusColumnWidth NautilusColumnWidth;
 
 NautilusColumnWidth * nautilus_column_width_new   (void);
 void                  nautilus_column_width_free  (NautilusColumnWidth *self);
-void                  nautilus_column_width_reset (NautilusColumnWidth *self);
 void                  nautilus_column_width_set_visible (NautilusColumnWidth *self,
                                                          gboolean             visible);
 
