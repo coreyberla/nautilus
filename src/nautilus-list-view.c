@@ -50,6 +50,8 @@ struct _NautilusListView
     GtkColumnViewColumn *star_column;
     GtkWidget *column_editor;
     GHashTable *factory_to_column_map;
+    /* NautilusColumnWidth of each label column, borrowed by its cells. */
+    GPtrArray *column_widths;
 
     GtkSorter *view_model_sorter;
 };
@@ -568,18 +570,9 @@ update_sort_directories_first (NautilusListView *self)
 static void
 reset_label_column_widths (NautilusListView *self)
 {
-    GHashTableIter iter;
-    gpointer factory;
-
-    g_hash_table_iter_init (&iter, self->factory_to_column_map);
-    while (g_hash_table_iter_next (&iter, &factory, NULL))
+    for (guint i = 0; i < self->column_widths->len; i++)
     {
-        NautilusColumnWidth *column_width = g_object_get_data (factory, "column-width");
-
-        if (column_width != NULL)
-        {
-            nautilus_column_width_reset (column_width);
-        }
+        nautilus_column_width_reset (g_ptr_array_index (self->column_widths, i));
     }
 }
 
@@ -1009,6 +1002,7 @@ setup_view_columns (NautilusListView *self)
 
     nautilus_columns = nautilus_get_all_columns ();
 
+    self->column_widths = g_ptr_array_new_with_free_func ((GDestroyNotify) nautilus_column_width_free);
     self->factory_to_column_map = g_hash_table_new_full (g_direct_hash,
                                                          g_direct_equal,
                                                          NULL,
@@ -1061,9 +1055,10 @@ setup_view_columns (NautilusListView *self)
         }
         else
         {
-            g_object_set_data_full (G_OBJECT (factory), "column-width",
-                                    nautilus_column_width_new (),
-                                    (GDestroyNotify) nautilus_column_width_unref);
+            NautilusColumnWidth *column_width = nautilus_column_width_new ();
+
+            g_ptr_array_add (self->column_widths, column_width);
+            g_object_set_data (G_OBJECT (factory), "column-width", column_width);
             g_signal_connect (factory, "setup", G_CALLBACK (setup_label_cell), self);
         }
 
@@ -1207,6 +1202,11 @@ nautilus_list_view_dispose (GObject *object)
 static void
 nautilus_list_view_finalize (GObject *object)
 {
+    NautilusListView *self = NAUTILUS_LIST_VIEW (object);
+
+    /* Not in dispose: cells hold on to these until they are gone. */
+    g_clear_pointer (&self->column_widths, g_ptr_array_unref);
+
     G_OBJECT_CLASS (nautilus_list_view_parent_class)->finalize (object);
 }
 

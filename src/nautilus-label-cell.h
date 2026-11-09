@@ -21,7 +21,7 @@ G_DECLARE_FINAL_TYPE (NautilusLabelCell, nautilus_label_cell, NAUTILUS, LABEL_CE
 typedef struct _NautilusColumnWidth NautilusColumnWidth;
 
 NautilusColumnWidth * nautilus_column_width_new   (void);
-void                  nautilus_column_width_unref (NautilusColumnWidth *self);
+void                  nautilus_column_width_free  (NautilusColumnWidth *self);
 void                  nautilus_column_width_reset (NautilusColumnWidth *self);
 
 NautilusViewCell * nautilus_label_cell_new (NautilusListBase    *view,

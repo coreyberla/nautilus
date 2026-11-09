@@ -39,20 +39,12 @@ struct _NautilusColumnWidth
     GHashTable *text_widths;
 };
 
-#define MAX_CACHED_WIDTHS 1000
-
-static void
-column_width_clear (gpointer data)
-{
-    NautilusColumnWidth *self = data;
-
-    g_hash_table_unref (self->text_widths);
-}
+#define MAX_CACHED_WIDTHS 10000
 
 NautilusColumnWidth *
 nautilus_column_width_new (void)
 {
-    NautilusColumnWidth *self = g_rc_box_new0 (NautilusColumnWidth);
+    NautilusColumnWidth *self = g_new0 (NautilusColumnWidth, 1);
 
     self->text_widths = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
 
@@ -60,9 +52,10 @@ nautilus_column_width_new (void)
 }
 
 void
-nautilus_column_width_unref (NautilusColumnWidth *self)
+nautilus_column_width_free (NautilusColumnWidth *self)
 {
-    g_rc_box_release_full (self, column_width_clear);
+    g_hash_table_unref (self->text_widths);
+    g_free (self);
 }
 
 void
@@ -324,16 +317,6 @@ nautilus_label_cell_dispose (GObject *object)
 }
 
 static void
-nautilus_label_cell_finalize (GObject *object)
-{
-    NautilusLabelCell *self = (NautilusLabelCell *) object;
-
-    nautilus_column_width_unref (self->column_width);
-
-    G_OBJECT_CLASS (nautilus_label_cell_parent_class)->finalize (object);
-}
-
-static void
 nautilus_label_cell_class_init (NautilusLabelCellClass *klass)
 {
     GObjectClass *object_class = G_OBJECT_CLASS (klass);
@@ -342,7 +325,6 @@ nautilus_label_cell_class_init (NautilusLabelCellClass *klass)
     object_class->set_property = nautilus_label_cell_set_property;
     object_class->constructed = nautilus_label_cell_constructed;
     object_class->dispose = nautilus_label_cell_dispose;
-    object_class->finalize = nautilus_label_cell_finalize;
 
     widget_class->map = nautilus_label_cell_map;
     widget_class->measure = nautilus_label_cell_measure;
@@ -358,8 +340,8 @@ nautilus_label_cell_class_init (NautilusLabelCellClass *klass)
 
 /**
  * nautilus_label_cell_new:
- * @column_width: shared by all cells of the column; the view resets it when it
- *   loads a new directory.
+ * @column_width: shared by all cells of the column. Owned by the view, which
+ *   outlives its cells, and reset when it loads a new directory.
  */
 NautilusViewCell *
 nautilus_label_cell_new (NautilusListBase    *view,
@@ -371,7 +353,7 @@ nautilus_label_cell_new (NautilusListBase    *view,
                                             "column", column,
                                             NULL);
 
-    self->column_width = g_rc_box_acquire (column_width);
+    self->column_width = column_width;
 
     return NAUTILUS_VIEW_CELL (self);
 }
