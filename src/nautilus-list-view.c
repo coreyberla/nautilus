@@ -50,7 +50,7 @@ struct _NautilusListView
     GtkColumnViewColumn *star_column;
     GtkWidget *column_editor;
     GHashTable *factory_to_column_map;
-    /* NautilusColumnWidth of each label column, borrowed by its cells. */
+    /* Borrowed by the cells. */
     GPtrArray *column_widths;
 
     GtkSorter *view_model_sorter;
@@ -563,10 +563,7 @@ update_sort_directories_first (NautilusListView *self)
     }
 }
 
-/* Label columns only grow to fit the widest text seen. Start over for a new
- * directory, so they can shrink again. The view is empty at this point, so no
- * cell is left measured against the old width. This also drops cached text
- * widths, which would otherwise go stale if the font changed. */
+/* The view is empty by now, so no cell keeps the old width. */
 static void
 reset_label_column_widths (NautilusListView *self)
 {

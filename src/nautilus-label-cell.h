@@ -17,7 +17,6 @@ G_BEGIN_DECLS
 
 G_DECLARE_FINAL_TYPE (NautilusLabelCell, nautilus_label_cell, NAUTILUS, LABEL_CELL, NautilusViewCell)
 
-/* Width of a label column, fitted to the widest text its cells have shown. */
 typedef struct _NautilusColumnWidth NautilusColumnWidth;
 
 NautilusColumnWidth * nautilus_column_width_new   (void);

@@ -339,8 +339,7 @@ on_label_query_tooltip (GtkWidget  *widget,
         return FALSE;
     }
 
-    /* The inscription doesn't expose whether it is ellipsized, so measure the
-     * text here, only on hover, rather than on every bind. */
+    /* GtkInscription doesn't tell whether it is ellipsized. */
     layout = gtk_widget_create_pango_layout (widget, text);
     pango_layout_get_pixel_size (layout, &text_width, NULL);
     if (text_width > gtk_widget_get_width (widget))
