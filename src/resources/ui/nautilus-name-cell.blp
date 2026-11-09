@@ -50,6 +50,7 @@ template $NautilusNameCell: $NautilusViewCell {
             text-overflow: ellipsize_middle;
             hexpand: true;
             has-tooltip: true;
+            attributes: "0 -1 insert-hyphens false";
             query-tooltip => $on_label_query_tooltip();
             text: bind template.item as <$NautilusViewItem>.file as <$NautilusFile>.display-name;
           }
@@ -75,6 +76,7 @@ template $NautilusNameCell: $NautilusViewCell {
           visible: false;
           text-overflow: ellipsize_start;
           xalign: 0.0;
+          attributes: "0 -1 insert-hyphens false";
 
           styles [
             "caption",

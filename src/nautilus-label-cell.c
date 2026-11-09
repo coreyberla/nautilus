@@ -28,6 +28,8 @@ struct _NautilusLabelCell
     /* -1 until measured. */
     int text_width;
     int width;
+
+    gboolean show_snippet;
 };
 
 G_DEFINE_FINAL_TYPE (NautilusLabelCell, nautilus_label_cell, NAUTILUS_TYPE_VIEW_CELL)
@@ -202,6 +204,7 @@ nautilus_label_cell_init (NautilusLabelCell *self)
 
     child = gtk_inscription_new (NULL);
     gtk_widget_set_parent (child, GTK_WIDGET (self));
+    gtk_widget_set_valign (child, GTK_ALIGN_CENTER);
     gtk_widget_add_css_class (child, "dimmed");
     gtk_inscription_set_min_chars (GTK_INSCRIPTION (child), 0);
     gtk_inscription_set_text_overflow (GTK_INSCRIPTION (child), GTK_INSCRIPTION_OVERFLOW_ELLIPSIZE_END);
