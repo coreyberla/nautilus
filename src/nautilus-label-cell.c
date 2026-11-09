@@ -27,6 +27,7 @@ struct _NautilusLabelCell
 
     NautilusColumnWidth *column_width;
     int text_width;
+    gboolean needs_measure;
     guint resize_tick_id;
 };
 
@@ -34,6 +35,7 @@ struct _NautilusLabelCell
 struct _NautilusColumnWidth
 {
     int width;
+    gboolean visible;
     gboolean needs_update;
     GHashTable *text_widths;
     GHashTable *cells;
@@ -46,6 +48,7 @@ nautilus_column_width_new (void)
 {
     NautilusColumnWidth *self = g_new0 (NautilusColumnWidth, 1);
 
+    self->visible = TRUE;
     self->text_widths = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
     self->cells = g_hash_table_new (NULL, NULL);
 
@@ -195,7 +198,41 @@ update_label (NautilusLabelCell *self)
 
     /* Unlike GtkLabel, doesn't queue a resize. */
     gtk_inscription_set_text (self->inscription, string);
-    set_text_width (self, measure_text (self, string));
+
+    /* Cells of hidden columns are bound too. */
+    self->needs_measure = !self->column_width->visible;
+    if (!self->needs_measure)
+    {
+        set_text_width (self, measure_text (self, string));
+    }
+}
+
+void
+nautilus_column_width_set_visible (NautilusColumnWidth *self,
+                                   gboolean             visible)
+{
+    GHashTableIter iter;
+    gpointer cell;
+
+    self->visible = visible;
+    if (!visible)
+    {
+        return;
+    }
+
+    g_hash_table_iter_init (&iter, self->cells);
+    while (g_hash_table_iter_next (&iter, &cell, NULL))
+    {
+        NautilusLabelCell *label_cell = cell;
+
+        if (label_cell->needs_measure)
+        {
+            label_cell->needs_measure = FALSE;
+            set_text_width (label_cell,
+                            measure_text (label_cell,
+                                          gtk_inscription_get_text (label_cell->inscription)));
+        }
+    }
 }
 
 static void

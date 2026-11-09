@@ -223,15 +223,18 @@ apply_columns_settings (NautilusListView  *self,
     for (guint i = 0; i < g_list_model_get_n_items (old_view_columns); i++)
     {
         g_autoptr (GtkColumnViewColumn) view_column = NULL;
+        gboolean visible;
+        NautilusColumnWidth *column_width;
 
         view_column = g_list_model_get_item (old_view_columns, i);
-        if (g_list_find (view_columns, view_column) == NULL)
+        visible = g_list_find (view_columns, view_column) != NULL;
+        gtk_column_view_column_set_visible (view_column, visible);
+
+        column_width = g_object_get_data (G_OBJECT (gtk_column_view_column_get_factory (view_column)),
+                                          "column-width");
+        if (column_width != NULL)
         {
-            gtk_column_view_column_set_visible (view_column, FALSE);
-        }
-        else
-        {
-            gtk_column_view_column_set_visible (view_column, TRUE);
+            nautilus_column_width_set_visible (column_width, visible);
         }
     }
 
