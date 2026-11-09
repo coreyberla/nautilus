@@ -159,6 +159,9 @@ struct _NautilusFilesView
     /* Set while load_directory() stops the previous load, so that the items
      * are kept for the transition to the new load. */
     gboolean restarting_load;
+    /* The window slot is preparing to change location (e.g. querying the new
+     * location's info or mounting it), before load_directory() is called. */
+    gboolean location_change_pending;
     gboolean begin_loading_delayed;
 
     guint display_pending_source_id;
@@ -354,19 +357,26 @@ remove_loading_floating_bar (NautilusFilesView *self)
 static void
 real_setup_loading_floating_bar (NautilusFilesView *self)
 {
+    gboolean busy = self->loading || self->location_change_pending;
+
     nautilus_floating_bar_set_primary_label (NAUTILUS_FLOATING_BAR (self->floating_bar),
                                              nautilus_files_view_is_searching (self) ? _("Searching…") : _("Loading…"));
     nautilus_floating_bar_set_details_label (NAUTILUS_FLOATING_BAR (self->floating_bar), NULL);
-    nautilus_floating_bar_set_show_stop (NAUTILUS_FLOATING_BAR (self->floating_bar), self->loading);
+    nautilus_floating_bar_set_show_stop (NAUTILUS_FLOATING_BAR (self->floating_bar), busy);
 
     gtk_widget_set_visible (self->floating_bar, TRUE);
 
     /* Search results stream in, so don't dim them while searching. */
-    if (self->loading && !nautilus_files_view_is_searching (self))
+    if (busy && !nautilus_files_view_is_searching (self))
     {
         /* Dims the view items, but not the list view column headers. */
         gtk_widget_add_css_class (GTK_WIDGET (self), "loading-folder");
         gtk_widget_set_visible (self->loading_spinner, TRUE);
+    }
+    else
+    {
+        gtk_widget_remove_css_class (GTK_WIDGET (self), "loading-folder");
+        gtk_widget_set_visible (self->loading_spinner, FALSE);
     }
 }
 
@@ -399,6 +409,50 @@ setup_loading_floating_bar (NautilusFilesView *self)
         g_timeout_add_once (FLOATING_BAR_LOADING_DELAY, setup_loading_floating_bar_timeout_cb, self);
 }
 
+/**
+ * nautilus_files_view_begin_location_change:
+ *
+ * Called by the window slot when it starts changing to a new location, before
+ * the new location is set on the view. This starts the loading indication
+ * delay right away, so that it accounts for the time spent before the view
+ * starts loading the new location (e.g. querying its info or mounting it).
+ *
+ * Must be balanced by nautilus_files_view_end_location_change().
+ */
+void
+nautilus_files_view_begin_location_change (NautilusFilesView *self)
+{
+    g_return_if_fail (NAUTILUS_IS_FILES_VIEW (self));
+
+    self->location_change_pending = TRUE;
+    setup_loading_floating_bar (self);
+}
+
+/**
+ * nautilus_files_view_end_location_change:
+ *
+ * Called by the window slot when a location change ends, successfully or
+ * not. If the view didn't start loading a new location, this removes the
+ * loading indication started by nautilus_files_view_begin_location_change().
+ */
+void
+nautilus_files_view_end_location_change (NautilusFilesView *self)
+{
+    g_return_if_fail (NAUTILUS_IS_FILES_VIEW (self));
+
+    if (!self->location_change_pending)
+    {
+        return;
+    }
+
+    self->location_change_pending = FALSE;
+
+    if (!self->loading)
+    {
+        remove_loading_floating_bar (self);
+    }
+}
+
 static void
 floating_bar_stop_cb (NautilusFloatingBar *floating_bar,
                       NautilusFilesView   *self)
@@ -412,7 +466,7 @@ real_floating_bar_set_short_status (NautilusFilesView *self,
                                     const gchar       *primary_status,
                                     const gchar       *detail_status)
 {
-    if (self->loading)
+    if (self->loading || self->location_change_pending)
     {
         return;
     }
@@ -8515,8 +8569,6 @@ load_directory (NautilusFilesView *self,
 
     self->loading = TRUE;
 
-    setup_loading_floating_bar (self);
-
     g_clear_pointer (&self->subdirectories_loading, g_list_free);
     while (self->subdirectory_list != NULL)
     {
@@ -8535,6 +8587,23 @@ load_directory (NautilusFilesView *self,
     g_object_notify_by_pspec (G_OBJECT (self), properties[PROP_LOCATION]);
     g_object_notify_by_pspec (G_OBJECT (self), properties[PROP_LOADING]);
     g_object_notify_by_pspec (G_OBJECT (self), properties[PROP_SEARCHING]);
+
+    if (self->location_change_pending)
+    {
+        /* The loading indication delay was already started when the location
+         * change began, so don't restart it. Loading takes over from here. */
+        self->location_change_pending = FALSE;
+
+        if (self->floating_bar_loading_timeout_id == 0)
+        {
+            /* Already shown. Refresh it for the new location (e.g. now searching). */
+            real_setup_loading_floating_bar (self);
+        }
+    }
+    else
+    {
+        setup_loading_floating_bar (self);
+    }
 
     /* FIXME bugzilla.gnome.org 45062: In theory, we also need to monitor metadata here (as
      * well as doing a call when ready), in case external forces
