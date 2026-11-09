@@ -26,25 +26,26 @@ struct _NautilusLabelCell
     PangoLayout *measure_layout;
 
     NautilusColumnWidth *column_width;
+    int text_width;
     gboolean needs_measure;
     guint resize_tick_id;
 };
 
-/* Shared by all cells of a column in a view. */
+/* Grows while scrolling, and shrinks to the cells on screen once it stops. */
 struct _NautilusColumnWidth
 {
-    /* Only grows, so it is the widest text seen so far. */
     int widest_text;
-    /* What cells report as their width: widest_text, once the column has been
-     * told to resize for it. Reporting widest_text right away would make cells
-     * wider than the column's cached width, overflowing into the next one. */
+    /* Lags widest_text until the column is resized for it, as cells wider than
+     * the column's cached width would overflow into the next column. */
     int width;
-    /* Text → width in pixels. Columns repeat a lot of values (types, owners,
-     * dates), so this saves laying out the same text again on every bind. */
     GHashTable *text_widths;
+    GHashTable *mapped_cells;
+    gint64 last_measure_time;
+    guint shrink_timeout_id;
 };
 
 #define MAX_CACHED_WIDTHS 10000
+#define SHRINK_DELAY_MS 500
 
 NautilusColumnWidth *
 nautilus_column_width_new (void)
@@ -52,6 +53,7 @@ nautilus_column_width_new (void)
     NautilusColumnWidth *self = g_new0 (NautilusColumnWidth, 1);
 
     self->text_widths = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+    self->mapped_cells = g_hash_table_new (NULL, NULL);
 
     return self;
 }
@@ -59,7 +61,9 @@ nautilus_column_width_new (void)
 void
 nautilus_column_width_free (NautilusColumnWidth *self)
 {
+    g_clear_handle_id (&self->shrink_timeout_id, g_source_remove);
     g_hash_table_unref (self->text_widths);
+    g_hash_table_unref (self->mapped_cells);
     g_free (self);
 }
 
@@ -94,8 +98,43 @@ resize_column (GtkWidget     *widget,
     if (self->column_width->widest_text > self->column_width->width)
     {
         self->column_width->width = self->column_width->widest_text;
-        /* Makes the column measure all its cells again. */
         gtk_widget_queue_resize (widget);
+    }
+
+    return G_SOURCE_REMOVE;
+}
+
+static gboolean
+shrink_to_mapped_cells (gpointer user_data)
+{
+    NautilusColumnWidth *self = user_data;
+    gint64 idle_ms = (g_get_monotonic_time () - self->last_measure_time) / 1000;
+    GHashTableIter iter;
+    gpointer cell;
+    NautilusLabelCell *any_cell = NULL;
+    int needed = 0;
+
+    if (idle_ms < SHRINK_DELAY_MS)
+    {
+        self->shrink_timeout_id = g_timeout_add (SHRINK_DELAY_MS - idle_ms,
+                                                 shrink_to_mapped_cells, self);
+        return G_SOURCE_REMOVE;
+    }
+
+    self->shrink_timeout_id = 0;
+
+    g_hash_table_iter_init (&iter, self->mapped_cells);
+    while (g_hash_table_iter_next (&iter, &cell, NULL))
+    {
+        any_cell = cell;
+        needed = MAX (needed, any_cell->text_width);
+    }
+
+    if (any_cell != NULL && needed < self->width)
+    {
+        self->widest_text = needed;
+        self->width = needed;
+        gtk_widget_queue_resize (GTK_WIDGET (any_cell));
     }
 
     return G_SOURCE_REMOVE;
@@ -109,6 +148,15 @@ measure_text (NautilusLabelCell *self)
     int width;
 
     self->needs_measure = FALSE;
+    self->text_width = 0;
+
+    self->column_width->last_measure_time = g_get_monotonic_time ();
+    if (self->column_width->shrink_timeout_id == 0)
+    {
+        self->column_width->shrink_timeout_id = g_timeout_add (SHRINK_DELAY_MS,
+                                                               shrink_to_mapped_cells,
+                                                               self->column_width);
+    }
 
     if (text == NULL || *text == '\0')
     {
@@ -132,7 +180,6 @@ measure_text (NautilusLabelCell *self)
         pango_layout_set_text (self->measure_layout, text, -1);
         pango_layout_get_pixel_size (self->measure_layout, &width, NULL);
 
-        /* Columns of unique values (exact sizes, times) would grow it forever. */
         if (g_hash_table_size (self->column_width->text_widths) >= MAX_CACHED_WIDTHS)
         {
             g_hash_table_remove_all (self->column_width->text_widths);
@@ -141,13 +188,12 @@ measure_text (NautilusLabelCell *self)
                              g_strdup (text), GINT_TO_POINTER (width));
     }
 
-    /* Only grow, so a resize is queued only when a new widest text shows up. */
+    self->text_width = width;
+
     self->column_width->widest_text = MAX (self->column_width->widest_text, width);
 
-    /* This runs on bind and map, which can happen in the middle of layout,
-     * where a resize may be dropped. Resize at the start of the next frame
-     * instead. Checked on every measurement, so if this cell goes away before
-     * then, the next cell to be measured schedules it again. */
+    /* Bind and map can happen during layout, where a resize may be dropped.
+     * If this cell goes away before the tick, the next measurement retries. */
     if (self->column_width->widest_text > self->column_width->width &&
         self->resize_tick_id == 0)
     {
@@ -169,12 +215,10 @@ update_label (NautilusLabelCell *self)
 
     string = nautilus_file_get_string_attribute_q (file, self->attribute_q);
 
-    /* Unlike GtkLabel, this doesn't queue a resize: rebinding while scrolling
-     * doesn't relayout the column. */
+    /* Unlike GtkLabel, doesn't queue a resize. */
     gtk_inscription_set_text (self->inscription, string);
 
-    /* Cells of hidden columns are bound too, but not mapped; don't spend time
-     * measuring them until they are shown. */
+    /* Cells of hidden columns are bound too, but not mapped. */
     self->needs_measure = TRUE;
     if (gtk_widget_get_mapped (GTK_WIDGET (self)))
     {
@@ -188,9 +232,8 @@ on_file_changed (NautilusLabelCell *self)
     g_autoptr (NautilusViewItem) item = nautilus_view_cell_get_item (NAUTILUS_VIEW_CELL (self));
     g_autofree gchar *string = NULL;
 
-    /* "file-changed" is emitted for any attribute (e.g. thumbnails), so avoid
-     * measuring again when this column's text stays the same. Not done on bind,
-     * where the column width may have been reset. */
+    /* Emitted for any attribute. Not checked on bind, where the column width
+     * may have been reset. */
     string = nautilus_file_get_string_attribute_q (nautilus_view_item_get_file (item),
                                                    self->attribute_q);
     if (g_strcmp0 (string, gtk_inscription_get_text (self->inscription)) != 0)
@@ -206,10 +249,22 @@ nautilus_label_cell_map (GtkWidget *widget)
 
     GTK_WIDGET_CLASS (nautilus_label_cell_parent_class)->map (widget);
 
+    g_hash_table_add (self->column_width->mapped_cells, self);
+
     if (self->needs_measure)
     {
         measure_text (self);
     }
+}
+
+static void
+nautilus_label_cell_unmap (GtkWidget *widget)
+{
+    NautilusLabelCell *self = NAUTILUS_LABEL_CELL (widget);
+
+    g_hash_table_remove (self->column_width->mapped_cells, self);
+
+    GTK_WIDGET_CLASS (nautilus_label_cell_parent_class)->unmap (widget);
 }
 
 static void
@@ -276,9 +331,7 @@ nautilus_label_cell_init (NautilusLabelCell *self)
     child = gtk_inscription_new (NULL);
     gtk_widget_set_parent (child, GTK_WIDGET (self));
     gtk_widget_add_css_class (child, "dimmed");
-    /* Width comes from our own measurement, not from character counts. */
     gtk_inscription_set_min_chars (GTK_INSCRIPTION (child), 0);
-    /* Only reached if the user shrinks the column. */
     gtk_inscription_set_text_overflow (GTK_INSCRIPTION (child), GTK_INSCRIPTION_OVERFLOW_ELLIPSIZE_END);
     self->inscription = GTK_INSCRIPTION (child);
 
@@ -319,13 +372,12 @@ nautilus_label_cell_constructed (GObject *object)
 
     if (g_strcmp0 (column_name, "permissions") == 0)
     {
-        /* Font family is part of the pango context, so measurement sees it. */
         gtk_widget_add_css_class (GTK_WIDGET (self->inscription), "monospace");
     }
     else
     {
-        /* Same as the "numeric" style class, but as an attribute instead of
-         * CSS so that the measurement layout can share it. */
+        /* Instead of the "numeric" style class: CSS font features don't
+         * reach the measurement layout. */
         g_autoptr (PangoAttrList) attrs = pango_attr_list_new ();
 
         pango_attr_list_insert (attrs, pango_attr_font_features_new ("tnum=1"));
@@ -359,6 +411,7 @@ nautilus_label_cell_class_init (NautilusLabelCellClass *klass)
     object_class->dispose = nautilus_label_cell_dispose;
 
     widget_class->map = nautilus_label_cell_map;
+    widget_class->unmap = nautilus_label_cell_unmap;
     widget_class->measure = nautilus_label_cell_measure;
     widget_class->size_allocate = nautilus_label_cell_size_allocate;
 
@@ -370,11 +423,6 @@ nautilus_label_cell_class_init (NautilusLabelCellClass *klass)
     g_object_class_install_properties (object_class, N_PROPS, properties);
 }
 
-/**
- * nautilus_label_cell_new:
- * @column_width: shared by all cells of the column. Owned by the view, which
- *   outlives its cells, and reset when it loads a new directory.
- */
 NautilusViewCell *
 nautilus_label_cell_new (NautilusListBase    *view,
                          NautilusColumn      *column,
