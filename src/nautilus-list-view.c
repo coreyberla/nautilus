@@ -31,6 +31,24 @@
 /* We wait two seconds after row is collapsed to unload the subdirectory */
 #define COLLAPSE_TO_UNLOAD_DELAY 2
 
+/* Fitted to the widest text among its bound cells. */
+typedef struct
+{
+    NautilusListView *view;
+    NautilusColumn *column;
+    GtkColumnViewColumn *view_column;
+    GPtrArray *cells;
+    int width;
+    gboolean needs_update;
+} LabelColumn;
+
+static void
+label_column_free (LabelColumn *self)
+{
+    g_ptr_array_unref (self->cells);
+    g_free (self);
+}
+
 struct _NautilusListView
 {
     NautilusListBase parent_instance;
@@ -50,8 +68,8 @@ struct _NautilusListView
     GtkColumnViewColumn *star_column;
     GtkWidget *column_editor;
     GHashTable *factory_to_column_map;
-    /* Borrowed by the cells. */
-    GPtrArray *column_widths;
+    GPtrArray *label_columns;
+    guint label_widths_tick_id;
 
     GtkSorter *view_model_sorter;
 };
@@ -124,6 +142,61 @@ real_get_zoom_level (NautilusListBase *list_base_view)
     NautilusListView *self = NAUTILUS_LIST_VIEW (list_base_view);
 
     return self->zoom_level;
+}
+
+static gboolean
+update_label_column_widths (GtkWidget     *widget,
+                            GdkFrameClock *frame_clock,
+                            gpointer       user_data)
+{
+    NautilusListView *self = NAUTILUS_LIST_VIEW (widget);
+
+    self->label_widths_tick_id = 0;
+
+    for (guint i = 0; i < self->label_columns->len; i++)
+    {
+        LabelColumn *label_column = g_ptr_array_index (self->label_columns, i);
+        int width = 0;
+
+        if (!label_column->needs_update ||
+            !gtk_column_view_column_get_visible (label_column->view_column))
+        {
+            continue;
+        }
+        label_column->needs_update = FALSE;
+
+        for (guint j = 0; j < label_column->cells->len; j++)
+        {
+            width = MAX (width, nautilus_label_cell_get_text_width (g_ptr_array_index (label_column->cells, j)));
+        }
+
+        if (width != label_column->width)
+        {
+            label_column->width = width;
+            for (guint j = 0; j < label_column->cells->len; j++)
+            {
+                nautilus_label_cell_set_width (g_ptr_array_index (label_column->cells, j), width);
+            }
+        }
+    }
+
+    return G_SOURCE_REMOVE;
+}
+
+static void
+queue_label_column_update (LabelColumn *label_column)
+{
+    NautilusListView *self = label_column->view;
+
+    label_column->needs_update = TRUE;
+
+    /* Binding can happen during layout, where a resize may be dropped. */
+    if (self->label_widths_tick_id == 0)
+    {
+        self->label_widths_tick_id = gtk_widget_add_tick_callback (GTK_WIDGET (self),
+                                                                   update_label_column_widths,
+                                                                   NULL, NULL);
+    }
 }
 
 static void
@@ -223,19 +296,16 @@ apply_columns_settings (NautilusListView  *self,
     for (guint i = 0; i < g_list_model_get_n_items (old_view_columns); i++)
     {
         g_autoptr (GtkColumnViewColumn) view_column = NULL;
-        gboolean visible;
-        NautilusColumnWidth *column_width;
 
         view_column = g_list_model_get_item (old_view_columns, i);
-        visible = g_list_find (view_columns, view_column) != NULL;
-        gtk_column_view_column_set_visible (view_column, visible);
+        gtk_column_view_column_set_visible (view_column,
+                                            g_list_find (view_columns, view_column) != NULL);
+    }
 
-        column_width = g_object_get_data (G_OBJECT (gtk_column_view_column_get_factory (view_column)),
-                                          "column-width");
-        if (column_width != NULL)
-        {
-            nautilus_column_width_set_visible (column_width, visible);
-        }
+    /* Columns being shown haven't measured their cells yet. */
+    for (guint i = 0; i < self->label_columns->len; i++)
+    {
+        queue_label_column_update (g_ptr_array_index (self->label_columns, i));
     }
 
     /* place columns in the correct order */
@@ -970,16 +1040,27 @@ setup_label_cell (GtkSignalListItemFactory *factory,
                   GtkColumnViewCell        *listitem,
                   gpointer                  user_data)
 {
-    NautilusListView *self = user_data;
-    NautilusColumn *nautilus_column;
+    LabelColumn *label_column = user_data;
     NautilusViewCell *cell;
 
-    nautilus_column = g_hash_table_lookup (self->factory_to_column_map, factory);
-
-    cell = nautilus_label_cell_new (NAUTILUS_LIST_BASE (user_data), nautilus_column,
-                                    g_object_get_data (G_OBJECT (factory), "column-width"));
+    cell = nautilus_label_cell_new (NAUTILUS_LIST_BASE (label_column->view), label_column->column);
     gtk_column_view_cell_set_child (listitem, GTK_WIDGET (cell));
     setup_cell_common (G_OBJECT (listitem), cell, GTK_WIDGET (cell));
+
+    nautilus_label_cell_set_width (NAUTILUS_LABEL_CELL (cell), label_column->width);
+    g_ptr_array_add (label_column->cells, cell);
+    g_signal_connect_swapped (cell, "text-changed",
+                              G_CALLBACK (queue_label_column_update), label_column);
+}
+
+static void
+teardown_label_cell (GtkSignalListItemFactory *factory,
+                     GtkColumnViewCell        *listitem,
+                     gpointer                  user_data)
+{
+    LabelColumn *label_column = user_data;
+
+    g_ptr_array_remove_fast (label_column->cells, gtk_column_view_cell_get_child (listitem));
 }
 
 static void
@@ -990,7 +1071,7 @@ setup_view_columns (NautilusListView *self)
 
     nautilus_columns = nautilus_get_all_columns ();
 
-    self->column_widths = g_ptr_array_new_with_free_func ((GDestroyNotify) nautilus_column_width_free);
+    self->label_columns = g_ptr_array_new_with_free_func ((GDestroyNotify) label_column_free);
     self->factory_to_column_map = g_hash_table_new_full (g_direct_hash,
                                                          g_direct_equal,
                                                          NULL,
@@ -1043,11 +1124,16 @@ setup_view_columns (NautilusListView *self)
         }
         else
         {
-            NautilusColumnWidth *column_width = nautilus_column_width_new ();
+            LabelColumn *label_column = g_new0 (LabelColumn, 1);
 
-            g_ptr_array_add (self->column_widths, column_width);
-            g_object_set_data (G_OBJECT (factory), "column-width", column_width);
-            g_signal_connect (factory, "setup", G_CALLBACK (setup_label_cell), self);
+            label_column->view = self;
+            label_column->column = nautilus_column;
+            label_column->view_column = view_column;
+            label_column->cells = g_ptr_array_new ();
+            g_ptr_array_add (self->label_columns, label_column);
+
+            g_signal_connect (factory, "setup", G_CALLBACK (setup_label_cell), label_column);
+            g_signal_connect (factory, "teardown", G_CALLBACK (teardown_label_cell), label_column);
         }
 
         gtk_column_view_append_column (self->view_ui, view_column);
@@ -1193,7 +1279,7 @@ nautilus_list_view_finalize (GObject *object)
     NautilusListView *self = NAUTILUS_LIST_VIEW (object);
 
     /* Not in dispose: cells hold on to these until they are gone. */
-    g_clear_pointer (&self->column_widths, g_ptr_array_unref);
+    g_clear_pointer (&self->label_columns, g_ptr_array_unref);
 
     G_OBJECT_CLASS (nautilus_list_view_parent_class)->finalize (object);
 }

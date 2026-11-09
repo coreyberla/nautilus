@@ -17,15 +17,11 @@ G_BEGIN_DECLS
 
 G_DECLARE_FINAL_TYPE (NautilusLabelCell, nautilus_label_cell, NAUTILUS, LABEL_CELL, NautilusViewCell)
 
-typedef struct _NautilusColumnWidth NautilusColumnWidth;
+NautilusViewCell * nautilus_label_cell_new            (NautilusListBase  *view,
+                                                    NautilusColumn    *column);
 
-NautilusColumnWidth * nautilus_column_width_new   (void);
-void                  nautilus_column_width_free  (NautilusColumnWidth *self);
-void                  nautilus_column_width_set_visible (NautilusColumnWidth *self,
-                                                         gboolean             visible);
-
-NautilusViewCell * nautilus_label_cell_new (NautilusListBase    *view,
-                                            NautilusColumn      *column,
-                                            NautilusColumnWidth *column_width);
+int                nautilus_label_cell_get_text_width (NautilusLabelCell *self);
+void               nautilus_label_cell_set_width      (NautilusLabelCell *self,
+                                                    int                width);
 
 G_END_DECLS
