@@ -97,6 +97,7 @@ resize_column (GtkWidget     *widget,
 
     if (self->column_width->widest_text > self->column_width->width)
     {
+        g_printerr ("GROW %d -> %d\n", self->column_width->width, self->column_width->widest_text);
         self->column_width->width = self->column_width->widest_text;
         gtk_widget_queue_resize (widget);
     }
@@ -116,6 +117,7 @@ shrink_to_mapped_cells (gpointer user_data)
 
     if (idle_ms < SHRINK_DELAY_MS)
     {
+        g_printerr ("SHRINK POSTPONED, last measured %" G_GINT64_FORMAT " ms ago\n", idle_ms);
         self->shrink_timeout_id = g_timeout_add (SHRINK_DELAY_MS - idle_ms,
                                                  shrink_to_mapped_cells, self);
         return G_SOURCE_REMOVE;
@@ -130,6 +132,7 @@ shrink_to_mapped_cells (gpointer user_data)
         needed = MAX (needed, any_cell->text_width);
     }
 
+    g_printerr ("SHRINK CHECK width %d needed %d (%u mapped cells)\n", self->width, needed, g_hash_table_size (self->mapped_cells));
     if (any_cell != NULL && needed < self->width)
     {
         self->widest_text = needed;
@@ -205,6 +208,7 @@ measure_text (NautilusLabelCell *self)
 static void
 update_label (NautilusLabelCell *self)
 {
+    g_printerr ("UPDATE %s\n", g_quark_to_string (self->attribute_q));
     g_autoptr (NautilusViewItem) item = NULL;
     NautilusFile *file;
     g_autofree gchar *string = NULL;
