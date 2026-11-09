@@ -122,7 +122,7 @@ update_labels (NautilusNameCell *self)
         fts_snippet = nautilus_file_get_search_fts_snippet (file);
     }
 
-    gtk_label_set_text (GTK_LABEL (self->path), path_text);
+    gtk_inscription_set_text (GTK_INSCRIPTION (self->path), path_text);
     if (fts_snippet != NULL &&
         !g_str_equal (gtk_label_get_text (self->snippet), fts_snippet))
     {
@@ -330,11 +330,22 @@ on_label_query_tooltip (GtkWidget  *widget,
                         GtkTooltip *tooltip,
                         gpointer    user_data)
 {
-    GtkLabel *label = GTK_LABEL (widget);
+    const char *text = gtk_inscription_get_text (GTK_INSCRIPTION (widget));
+    g_autoptr (PangoLayout) layout = NULL;
+    int text_width;
 
-    if (pango_layout_is_ellipsized (gtk_label_get_layout (label)))
+    if (text == NULL)
     {
-        gtk_tooltip_set_text (tooltip, gtk_label_get_text (label));
+        return FALSE;
+    }
+
+    /* The inscription doesn't expose whether it is ellipsized, so measure the
+     * text here, only on hover, rather than on every bind. */
+    layout = gtk_widget_create_pango_layout (widget, text);
+    pango_layout_get_pixel_size (layout, &text_width, NULL);
+    if (text_width > gtk_widget_get_width (widget))
+    {
+        gtk_tooltip_set_text (tooltip, text);
 
         return TRUE;
     }
