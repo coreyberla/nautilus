@@ -59,6 +59,8 @@ struct NautilusFilePrivate
 	char *symlink_name;
 	
 	GRefString *mime_type;
+	/* Computed from the info on demand. */
+	const char *description;
 	
 	char *selinux_context;
 	

@@ -2395,6 +2395,8 @@ update_info_internal (NautilusFile *file,
         return FALSE;
     }
 
+    file->details->description = NULL;
+
     if (info == NULL)
     {
         nautilus_file_mark_gone (file);
@@ -6749,7 +6751,7 @@ get_common_description (NautilusFile *file)
 }
 
 static const char *
-get_description (NautilusFile *file)
+compute_description (NautilusFile *file)
 {
     const char *common_description = get_common_description (file);
     if (common_description != NULL)
@@ -6762,6 +6764,17 @@ get_description (NautilusFile *file)
 
         return get_basic_type_for_mime_type (mime_type);
     }
+}
+
+static const char *
+get_description (NautilusFile *file)
+{
+    if (file->details->description == NULL)
+    {
+        file->details->description = compute_description (file);
+    }
+
+    return file->details->description;
 }
 
 static char *
