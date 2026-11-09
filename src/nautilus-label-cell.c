@@ -27,12 +27,17 @@ struct _NautilusLabelCell
 
     NautilusColumnWidth *column_width;
     gboolean needs_measure;
+    guint resize_tick_id;
 };
 
 /* Shared by all cells of a column in a view. */
 struct _NautilusColumnWidth
 {
     /* Only grows, so it is the widest text seen so far. */
+    int widest_text;
+    /* What cells report as their width: widest_text, once the column has been
+     * told to resize for it. Reporting widest_text right away would make cells
+     * wider than the column's cached width, overflowing into the next one. */
     int width;
     /* Text → width in pixels. Columns repeat a lot of values (types, owners,
      * dates), so this saves laying out the same text again on every bind. */
@@ -61,6 +66,7 @@ nautilus_column_width_free (NautilusColumnWidth *self)
 void
 nautilus_column_width_reset (NautilusColumnWidth *self)
 {
+    self->widest_text = 0;
     self->width = 0;
     g_hash_table_remove_all (self->text_widths);
 }
@@ -75,6 +81,25 @@ enum
 };
 
 static GParamSpec *properties[N_PROPS] = { NULL, };
+
+static gboolean
+resize_column (GtkWidget     *widget,
+               GdkFrameClock *frame_clock,
+               gpointer       user_data)
+{
+    NautilusLabelCell *self = NAUTILUS_LABEL_CELL (widget);
+
+    self->resize_tick_id = 0;
+
+    if (self->column_width->widest_text > self->column_width->width)
+    {
+        self->column_width->width = self->column_width->widest_text;
+        /* Makes the column measure all its cells again. */
+        gtk_widget_queue_resize (widget);
+    }
+
+    return G_SOURCE_REMOVE;
+}
 
 static void
 measure_text (NautilusLabelCell *self)
@@ -117,10 +142,17 @@ measure_text (NautilusLabelCell *self)
     }
 
     /* Only grow, so a resize is queued only when a new widest text shows up. */
-    if (width > self->column_width->width)
+    self->column_width->widest_text = MAX (self->column_width->widest_text, width);
+
+    /* This runs on bind and map, which can happen in the middle of layout,
+     * where a resize may be dropped. Resize at the start of the next frame
+     * instead. Checked on every measurement, so if this cell goes away before
+     * then, the next cell to be measured schedules it again. */
+    if (self->column_width->widest_text > self->column_width->width &&
+        self->resize_tick_id == 0)
     {
-        self->column_width->width = width;
-        gtk_widget_queue_resize (GTK_WIDGET (self));
+        self->resize_tick_id = gtk_widget_add_tick_callback (GTK_WIDGET (self),
+                                                             resize_column, NULL, NULL);
     }
 }
 
