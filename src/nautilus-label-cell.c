@@ -134,11 +134,21 @@ static int
 measure_text (NautilusLabelCell *self,
               const char        *text)
 {
+    g_autoptr (NautilusViewItem) item = nautilus_view_cell_get_item (NAUTILUS_VIEW_CELL (self));
+    guint text_hash;
     int width;
 
     if (text == NULL || *text == '\0')
     {
         return 0;
+    }
+
+    /* Scrolling back to a row doesn't measure it again. */
+    text_hash = g_str_hash (text);
+    if (item != NULL &&
+        nautilus_view_item_get_label_width (item, self->attribute_q, text_hash, &width))
+    {
+        return width;
     }
 
     if (self->measure_layout == NULL)
@@ -150,6 +160,11 @@ measure_text (NautilusLabelCell *self,
 
     pango_layout_set_text (self->measure_layout, text, -1);
     pango_layout_get_pixel_size (self->measure_layout, &width, NULL);
+
+    if (item != NULL)
+    {
+        nautilus_view_item_set_label_width (item, self->attribute_q, text_hash, width);
+    }
 
     return width;
 }

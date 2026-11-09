@@ -35,4 +35,13 @@ void               nautilus_view_item_set_item_ui   (NautilusViewItem *self,
 GtkWidget *        nautilus_view_item_get_item_ui   (NautilusViewItem *self);
 void               nautilus_view_item_file_changed  (NautilusViewItem *self);
 
+gboolean           nautilus_view_item_get_label_width (NautilusViewItem *self,
+                                                       GQuark            attribute_q,
+                                                       guint             text_hash,
+                                                       int              *width);
+void               nautilus_view_item_set_label_width (NautilusViewItem *self,
+                                                       GQuark            attribute_q,
+                                                       guint             text_hash,
+                                                       int               width);
+
 G_END_DECLS

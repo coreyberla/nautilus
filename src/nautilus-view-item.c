@@ -8,6 +8,13 @@
 
 #include "nautilus-file.h"
 
+typedef struct
+{
+    GQuark attribute_q;
+    guint text_hash;
+    int width;
+} LabelWidth;
+
 struct _NautilusViewItem
 {
     GObject parent_instance;
@@ -16,6 +23,9 @@ struct _NautilusViewItem
     gboolean loading;
     NautilusFile *file;
     GtkWidget *item_ui;
+
+    LabelWidth *label_widths;
+    guint n_label_widths;
 };
 
 G_DEFINE_FINAL_TYPE (NautilusViewItem, nautilus_view_item, G_TYPE_OBJECT)
@@ -56,6 +66,7 @@ nautilus_view_item_finalize (GObject *object)
     NautilusViewItem *self = NAUTILUS_VIEW_ITEM (object);
 
     g_clear_object (&self->file);
+    g_free (self->label_widths);
 
     G_OBJECT_CLASS (nautilus_view_item_parent_class)->finalize (object);
 }
@@ -263,6 +274,54 @@ nautilus_view_item_set_item_ui (NautilusViewItem *self,
     g_return_if_fail (NAUTILUS_IS_VIEW_ITEM (self));
 
     g_set_weak_pointer (&self->item_ui, item_ui);
+}
+
+/* The hash makes the width valid only for the text it was measured for, which
+ * can change without the file changing, e.g. "Today" becoming "Yesterday". */
+gboolean
+nautilus_view_item_get_label_width (NautilusViewItem *self,
+                                    GQuark            attribute_q,
+                                    guint             text_hash,
+                                    int              *width)
+{
+    for (guint i = 0; i < self->n_label_widths; i++)
+    {
+        if (self->label_widths[i].attribute_q == attribute_q)
+        {
+            *width = self->label_widths[i].width;
+            return self->label_widths[i].text_hash == text_hash;
+        }
+    }
+
+    return FALSE;
+}
+
+void
+nautilus_view_item_set_label_width (NautilusViewItem *self,
+                                    GQuark            attribute_q,
+                                    guint             text_hash,
+                                    int               width)
+{
+    guint i;
+
+    for (i = 0; i < self->n_label_widths; i++)
+    {
+        if (self->label_widths[i].attribute_q == attribute_q)
+        {
+            break;
+        }
+    }
+
+    if (i == self->n_label_widths)
+    {
+        self->n_label_widths++;
+        self->label_widths = g_renew (LabelWidth, self->label_widths,
+                                      self->n_label_widths);
+        self->label_widths[i].attribute_q = attribute_q;
+    }
+
+    self->label_widths[i].text_hash = text_hash;
+    self->label_widths[i].width = width;
 }
 
 void
