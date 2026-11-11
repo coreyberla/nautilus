@@ -171,7 +171,8 @@ parse_previous_copy_name (const char *appendix,
                           size_t      appendix_len,
                           size_t     *count)
 {
-    if (strncmp (appendix, COPY_APPENDIX_FIRST_COPY, appendix_len) == 0)
+    if (appendix_len == strlen (COPY_APPENDIX_FIRST_COPY) &&
+        strncmp (appendix, COPY_APPENDIX_FIRST_COPY, appendix_len) == 0)
     {
         /* File is a (first) copy */
         *count = 1;

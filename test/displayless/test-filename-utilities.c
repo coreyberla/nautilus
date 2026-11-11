@@ -60,6 +60,9 @@ test_filename_create_file_copy (void)
     ASSERT_DUPLICATION_NAME ("foo. (Copy)", "foo. (Copy 2)");
     ASSERT_DUPLICATION_NAME ("foo (Copy).txt", "foo (Copy 2).txt");
     ASSERT_DUPLICATION_NAME ("foo (Copy bar).txt", "foo (Copy bar) (Copy).txt");
+    ASSERT_DUPLICATION_NAME ("foo (C)", "foo (C) (Copy)");
+    ASSERT_DUPLICATION_NAME ("foo (Co).txt", "foo (Co) (Copy).txt");
+    ASSERT_DUPLICATION_NAME ("foo ()", "foo () (Copy)");
 
     /* higher order */
     ASSERT_DUPLICATION_NAME ("foo (Copy 2)", "foo (Copy 3)");
