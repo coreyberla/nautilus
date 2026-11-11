@@ -1,5 +1,6 @@
 #include "test-utilities.h"
 
+#include <src/nautilus-file.h>
 #include <src/nautilus-file-utilities.h>
 #include <src/nautilus-global-preferences.h>
 #include <src/nautilus-query.h>
@@ -61,11 +62,22 @@ main (int   argc,
 
     create_search_file_hierarchy ("simple");
 
+    /* Files in hidden folders must not be found when hidden files are hidden */
+    nautilus_query_set_show_hidden_files (query, FALSE);
+    /* Recursion is enabled for local locations known as NautilusFile */
+    g_autoptr (NautilusFile) location_file = nautilus_file_get (location);
+    nautilus_query_update_recursive_setting (query);
+    g_assert_true (nautilus_query_recursive (query));
+    g_autoptr (GFile) hidden_dir = g_file_get_child (location, ".hidden_engine_simple_dir");
+    g_autoptr (GFile) hidden_dir_child = g_file_get_child (hidden_dir, "engine_simple_child");
+    g_file_make_directory (hidden_dir, NULL, NULL);
+    g_file_replace_contents (hidden_dir_child, "", 0, NULL, FALSE, G_FILE_CREATE_NONE, NULL, NULL, NULL);
+
     nautilus_search_engine_start (engine, query);
 
     g_main_loop_run (loop);
 
-    g_assert_cmpint (total_hits, ==, 3);
+    g_assert_cmpint (total_hits, ==, 5);
 
     test_clear_tmp_dir ();
 
