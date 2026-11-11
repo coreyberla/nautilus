@@ -318,12 +318,15 @@ date_to_str (GDateTime *timestamp,
         if (use_short_format && !detailed_date)
         {
             g_autoptr (GDateTime) now = g_date_time_new_now (local_tz);
-            g_autoptr (GDateTime) today_midnight = g_date_time_new (local_tz,
+            /* Compare the local dates in UTC, as days in the local time zone
+             * are not always 24 hours long, e.g. due to daylight saving time. */
+            g_autoptr (GTimeZone) utc = g_time_zone_new_utc ();
+            g_autoptr (GDateTime) today_midnight = g_date_time_new (utc,
                                                                     g_date_time_get_year (now),
                                                                     g_date_time_get_month (now),
                                                                     g_date_time_get_day_of_month (now),
                                                                     0, 0, 0);
-            g_autoptr (GDateTime) date_midnight = g_date_time_new (local_tz,
+            g_autoptr (GDateTime) date_midnight = g_date_time_new (utc,
                                                                    g_date_time_get_year (timestamp),
                                                                    g_date_time_get_month (timestamp),
                                                                    g_date_time_get_day_of_month (timestamp),
