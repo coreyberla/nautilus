@@ -7447,7 +7447,13 @@ nautilus_file_updated_deep_count_in_progress (NautilusFile *file)
     GList *link_files, *node;
 
     g_assert (NAUTILUS_IS_FILE (file));
-    g_assert (nautilus_file_is_directory (file));
+
+    if (!nautilus_file_is_directory (file))
+    {
+        /* The file may no longer be known as a directory, e.g. if its mount
+         * went away while the deep count was still in progress. */
+        return;
+    }
 
     /* Send out a signal. */
     g_signal_emit (file, signals[UPDATED_DEEP_COUNT_IN_PROGRESS], 0, file);
