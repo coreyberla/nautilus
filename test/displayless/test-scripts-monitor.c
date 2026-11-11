@@ -380,8 +380,9 @@ test_hierarchy (void)
     g_assert_nonnull (menu);
     g_assert_cmpuint (g_menu_model_get_n_items (G_MENU_MODEL (menu)), ==, 3);
 
-    assert_submenu (G_MENU_MODEL (menu), 0, "first_folder", first_folder_entries);
-    assert_submenu (G_MENU_MODEL (menu), 1, "second_folder", second_folder_entries);
+    /* Underscores in folder names are escaped, so they aren't taken as mnemonics. */
+    assert_submenu (G_MENU_MODEL (menu), 0, "first__folder", first_folder_entries);
+    assert_submenu (G_MENU_MODEL (menu), 1, "second__folder", second_folder_entries);
 
     label = get_menu_item_label (G_MENU_MODEL (menu), 2);
     g_assert_cmpstr (label, ==, "top_script.sh");

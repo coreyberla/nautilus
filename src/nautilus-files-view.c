@@ -5176,6 +5176,7 @@ add_script_to_scripts_menus (NautilusFile *file,
     ScriptLaunchParameters *launch_parameters;
     GAction *action;
     const gchar *shortcut;
+    g_autofree char *label = NULL;
 
     launch_parameters = script_launch_parameters_new (file, self);
 
@@ -5197,7 +5198,8 @@ add_script_to_scripts_menus (NautilusFile *file,
     g_object_unref (action);
 
     detailed_action_name = g_strconcat ("view.", action_name, NULL);
-    g_menu_append (menu, name, detailed_action_name);
+    label = escape_underscores (name);
+    g_menu_append (menu, label, detailed_action_name);
 
     if ((shortcut = g_hash_table_lookup (script_accels, name)))
     {

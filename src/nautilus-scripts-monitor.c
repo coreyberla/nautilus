@@ -227,9 +227,11 @@ get_menu_for_directory (NautilusScriptsMonitor *self,
 
                 if (children_menu != NULL)
                 {
-                    const char *file_name = nautilus_file_get_display_name (file);
+                    g_autoptr (GString) label = g_string_new (nautilus_file_get_display_name (file));
 
-                    g_menu_append_submenu (menu, file_name, G_MENU_MODEL (children_menu));
+                    /* Preserve underscores, which would be used for mnemonics */
+                    g_string_replace (label, "_", "__", 0);
+                    g_menu_append_submenu (menu, label->str, G_MENU_MODEL (children_menu));
                     any_scripts = TRUE;
                     g_object_unref (children_menu);
                 }
