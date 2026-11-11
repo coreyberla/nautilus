@@ -3650,6 +3650,16 @@ nautilus_files_view_update_status_overlay (NautilusFilesView *self)
             adw_status_page_set_title (status_page, _("No Known Connections"));
             adw_status_page_set_description (status_page, _("Enter an address to connect to a network location."));
         }
+        else if (self->directory_as_file != NULL &&
+                 nautilus_file_is_directory (self->directory_as_file) &&
+                 !nautilus_file_can_read (self->directory_as_file))
+        {
+            /* The folder may not be empty, its contents can't be listed */
+            adw_status_page_set_icon_name (status_page, "nautilus-folder");
+            adw_status_page_set_title (status_page, _("Contents Unreadable"));
+            adw_status_page_set_description (status_page,
+                                             _("You do not have the permissions necessary to view the contents of this folder."));
+        }
         else
         {
             adw_status_page_set_icon_name (status_page, "nautilus-folder");
