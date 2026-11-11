@@ -335,7 +335,11 @@ batch_rename_dialog_get_new_names_list (NautilusBatchRenameDialogMode  mode,
         {
             new_name = g_string_new (nautilus_file_get_name (file));
 
-            g_string_replace (new_name, entry_text, replace_text, -1);
+            /* An empty string would match between every character. */
+            if (entry_text != NULL && entry_text[0] != '\0')
+            {
+                g_string_replace (new_name, entry_text, replace_text, -1);
+            }
 
             result = g_list_prepend (result, new_name);
         }
