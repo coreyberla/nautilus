@@ -31,6 +31,8 @@ struct _NautilusImage
 
     gboolean is_loading_attributes;
     GCancellable *cancellable;
+    /* Set while loading a cached thumbnail whose validity is unknown */
+    GFileInfo *unvalidated_info;
     GError *error;
 };
 
@@ -52,6 +54,10 @@ G_DEFINE_FINAL_TYPE (NautilusImage, nautilus_image, GTK_TYPE_WIDGET);
 static void
 nautilus_image_set_texture (NautilusImage *self,
                             GdkTexture    *texture);
+
+static void
+create_thumbnail (NautilusImage *self,
+                  GFileInfo     *info);
 
 /* Global cache for all images. Maps GFile => GdkTexture */
 static NautilusHashQueue *thumbnail_cache;
@@ -242,11 +248,23 @@ thumbnail_texture_ready_callback (GObject      *source_object,
 {
     g_autoptr (GError) error = NULL;
     NautilusImage *self = user_data;
-    g_autoptr (GdkTexture) texture = thumbnail_load_from_stream_finish (res, NULL, &error);
+    time_t thumb_mtime = 0;
+    g_autoptr (GdkTexture) texture = thumbnail_load_from_stream_finish (res, &thumb_mtime, &error);
 
     if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
     {
         /* The operation was cancelled, bailout. */
+        return;
+    }
+
+    g_autoptr (GFileInfo) unvalidated_info = g_steal_pointer (&self->unvalidated_info);
+
+    if (unvalidated_info != NULL &&
+        (texture == NULL || (guint64) thumb_mtime != self->source_mtime))
+    {
+        /* The cached thumbnail is outdated or broken, so create a new one. */
+        create_thumbnail (self, unvalidated_info);
+
         return;
     }
 
@@ -275,6 +293,15 @@ thumbnail_file_read_callback (GObject      *source_object,
     if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
     {
         /* The operation was cancelled, bailout. */
+        return;
+    }
+
+    if (stream == NULL && self->unvalidated_info != NULL)
+    {
+        g_autoptr (GFileInfo) info = g_steal_pointer (&self->unvalidated_info);
+
+        create_thumbnail (self, info);
+
         return;
     }
 
@@ -347,26 +374,38 @@ file_info_ready_callback (GObject      *source_object,
         return;
     }
 
-    /* Look in the user's thumbnail cache */
-    if (g_file_info_has_attribute (info, G_FILE_ATTRIBUTE_THUMBNAIL_IS_VALID) &&
-        g_file_info_get_attribute_boolean (info, G_FILE_ATTRIBUTE_THUMBNAIL_IS_VALID))
+    /* Look in the user's thumbnail cache. Some backends (e.g. GVfs) provide
+     * the thumbnail path without checking its validity, in which case the
+     * thumbnail's mtime is checked after loading it. */
+    const char *thumb_path = g_file_info_get_attribute_byte_string (info, G_FILE_ATTRIBUTE_THUMBNAIL_PATH);
+    gboolean has_validity = g_file_info_has_attribute (info, G_FILE_ATTRIBUTE_THUMBNAIL_IS_VALID);
+
+    if (thumb_path != NULL &&
+        (!has_validity || g_file_info_get_attribute_boolean (info, G_FILE_ATTRIBUTE_THUMBNAIL_IS_VALID)))
     {
-        const char *thumb_path = g_file_info_get_attribute_byte_string (info, G_FILE_ATTRIBUTE_THUMBNAIL_PATH);
+        g_autoptr (GFile) thumb_file = g_file_new_for_path (thumb_path);
 
-        if (thumb_path != NULL)
+        if (!has_validity)
         {
-            g_autoptr (GFile) thumb_file = g_file_new_for_path (thumb_path);
-
-            g_file_read_async (thumb_file,
-                               G_PRIORITY_DEFAULT,
-                               self->cancellable,
-                               thumbnail_file_read_callback,
-                               self);
-
-            return;
+            g_set_object (&self->unvalidated_info, info);
         }
+
+        g_file_read_async (thumb_file,
+                           G_PRIORITY_DEFAULT,
+                           self->cancellable,
+                           thumbnail_file_read_callback,
+                           self);
+
+        return;
     }
 
+    create_thumbnail (self, info);
+}
+
+static void
+create_thumbnail (NautilusImage *self,
+                  GFileInfo     *info)
+{
     guint64 file_size = g_file_info_has_attribute (info, G_FILE_ATTRIBUTE_STANDARD_SIZE)
                         ? g_file_info_get_size (info)
                         : 0;
@@ -570,6 +609,7 @@ nautilus_image_set_source (NautilusImage *self,
     g_clear_pointer (&self->source_content_type, g_free);
     self->source_mtime = 0;
     g_clear_error (&self->error);
+    g_clear_object (&self->unvalidated_info);
 
     self->is_loading_attributes = FALSE;
     g_cancellable_cancel (self->cancellable);
@@ -822,6 +862,7 @@ nautilus_image_dispose (GObject *object)
     g_cancellable_cancel (self->cancellable);
     g_clear_object (&self->cancellable);
     g_clear_error (&self->error);
+    g_clear_object (&self->unvalidated_info);
 
     G_OBJECT_CLASS (nautilus_image_parent_class)->dispose (object);
 }
