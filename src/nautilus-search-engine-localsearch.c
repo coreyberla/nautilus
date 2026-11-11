@@ -229,12 +229,15 @@ create_statement (NautilusSearchProvider *provider,
         " ?atime" \
         " ?snippet"
 
+/* Access and creation times are optional: some file systems (e.g. FUSE
+ * mounts without birth time support) don't provide them, and such files
+ * must not be dropped from the results. */
 #define TRIPLE_PATTERN \
         "?file a nfo:FileDataObject;" \
         "  nfo:fileLastModified ?mtime;" \
-        "  nfo:fileLastAccessed ?atime;" \
-        "  nfo:fileCreated ?ctime;" \
-        "  nie:url ?url."
+        "  nie:url ?url." \
+        "  OPTIONAL { ?file nfo:fileLastAccessed ?atime }" \
+        "  OPTIONAL { ?file nfo:fileCreated ?ctime }"
 
     sparql = g_string_new ("SELECT DISTINCT " VARIABLES " WHERE {");
 
