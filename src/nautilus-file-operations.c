@@ -4004,13 +4004,13 @@ copy_move_directory (CopyMoveJob   *copy_job,
             {
                 src_file = g_file_get_child (src,
                                              g_file_info_get_name (info));
-                local_skipped_file = !copy_move_file (copy_job, src_file, *dest, same_fs, FALSE,
-                                                      NULL,
-                                                      &dest_fs_type, source_info, transfer_info,
-                                                      NULL, FALSE, reset_perms);
-
-                if (local_skipped_file)
+                if (!copy_move_file (copy_job, src_file, *dest, same_fs, FALSE,
+                                     NULL,
+                                     &dest_fs_type, source_info, transfer_info,
+                                     NULL, FALSE, reset_perms))
                 {
+                    /* Remember it, so that the source folder isn't deleted. */
+                    local_skipped_file = TRUE;
                     source_info_remove_file_from_count (src_file, job, source_info);
                     report_copy_progress (copy_job, source_info, transfer_info);
                 }
