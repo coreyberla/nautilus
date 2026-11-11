@@ -89,8 +89,12 @@ text_to_location (const char *text,
         return NULL;
     }
 
-    /* "~/" is not handled by g_file_resolve_relative_path / g_file_parse_name */
-    if (path[0] == '~' && path[1] == '/')
+    /* "~" and "~/" are not handled by g_file_resolve_relative_path / g_file_parse_name */
+    if (path[0] == '~' && path[1] == '\0')
+    {
+        return g_file_new_for_path (g_get_home_dir ());
+    }
+    else if (path[0] == '~' && path[1] == '/')
     {
         g_autoptr (GFile) home = g_file_new_for_path (g_get_home_dir ());
 
