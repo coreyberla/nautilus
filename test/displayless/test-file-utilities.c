@@ -43,6 +43,7 @@ test_common_prefix_two_strings (void)
         { "ǣȸʸ- ͻͻΎΘ$%%^", "ǣȸʸ- ͻͻΎΘ$%%&", "ǣȸʸ- ͻͻΎΘ$%%", 4 },
         { "CA", "CB", "C", 1 },
         { "CA", "BB", NULL, 1 },
+        { "    a.txt", "    b.txt", NULL, 4 },
         { NULL, NULL, NULL, 0 }
     };
 

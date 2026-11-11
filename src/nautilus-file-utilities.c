@@ -822,7 +822,7 @@ trim_whitespace (const gchar *string)
     length = g_utf8_strlen (string, -1);
     offset = g_utf8_offset_to_pointer (string, length);
 
-    while (space_count <= length)
+    while (space_count < length)
     {
         gunichar character;
 
