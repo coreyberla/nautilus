@@ -421,10 +421,29 @@ static void
 on_slot_activate_files (NautilusFileChooser *self,
                         GList               *files)
 {
-    if (gtk_widget_get_sensitive (self->accept_button) &&
-        mode_can_accept_files (self->mode, files))
+    if (!mode_can_accept_files (self->mode, files))
     {
-        gtk_widget_activate (self->accept_button);
+        return;
+    }
+
+    if (self->mode == NAUTILUS_MODE_SAVE_FILE)
+    {
+        if (gtk_widget_get_sensitive (self->accept_button))
+        {
+            gtk_widget_activate (self->accept_button);
+        }
+    }
+    else
+    {
+        /* Accept the activated files directly. The slot selection, and thus
+         * the accept button sensitivity, is only updated in an idle, so it's
+         * still outdated when an item is selected and activated by the same
+         * click, as happens in single-click mode. */
+        g_autolist (GFile) file_locations = g_list_copy_deep (files,
+                                                              (GCopyFunc) get_file_chooser_activation_location,
+                                                              NULL);
+
+        emit_accepted (self, file_locations);
     }
 }
 
