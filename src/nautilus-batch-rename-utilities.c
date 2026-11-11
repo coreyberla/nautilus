@@ -115,22 +115,32 @@ markup_hightlight_text (const char  *label,
                         const gchar *text_color,
                         const gchar *background_color)
 {
-    g_autoptr (GString) new_label = g_string_new_take (g_markup_escape_text (label, -1));
-
     if (substring == NULL || *substring == '\0')
     {
-        return g_steal_pointer (&new_label);
+        return g_string_new_take (g_markup_escape_text (label, -1));
     }
 
-    g_autofree gchar *escaped_substring = g_markup_escape_text (substring, -1);
     g_autofree gchar *escaped_replacement = g_markup_escape_text (replacement_text, -1);
     g_autofree gchar *highlighted_string = g_strdup_printf ("<span background='%s' color='%s'>%s</span>",
                                                             background_color, text_color,
                                                             escaped_replacement);
+    /* Split the label before escaping it, so that the substring can't match
+     * within the escaped markup, e.g. "t" within "&lt;" */
+    g_auto (GStrv) parts = g_strsplit (label, substring, -1);
+    GString *new_label = g_string_new (NULL);
 
-    g_string_replace (new_label, escaped_substring, highlighted_string, -1);
+    for (guint i = 0; parts[i] != NULL; i++)
+    {
+        g_autofree gchar *escaped_part = g_markup_escape_text (parts[i], -1);
 
-    return g_steal_pointer (&new_label);
+        if (i > 0)
+        {
+            g_string_append (new_label, highlighted_string);
+        }
+        g_string_append (new_label, escaped_part);
+    }
+
+    return new_label;
 }
 
 static gchar *
