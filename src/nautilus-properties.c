@@ -3531,6 +3531,17 @@ refresh_extension_model_pages (NautilusPropertiesWidget *self)
     g_autolist (GObject) providers =
         nautilus_module_get_extensions_for_type (NAUTILUS_TYPE_PROPERTIES_MODEL_PROVIDER);
 
+    for (GList *l = self->files; l != NULL; l = l->next)
+    {
+        if (nautilus_file_get_file_type (l->data) == G_FILE_TYPE_SPECIAL)
+        {
+            /* Extensions may try to read the file contents synchronously,
+             * which blocks forever on e.g. a named pipe (FIFO). */
+            g_clear_list (&providers, g_object_unref);
+            break;
+        }
+    }
+
     for (GList *l = providers; l != NULL; l = l->next)
     {
         GList *models = nautilus_properties_model_provider_get_models (l->data, self->files);
