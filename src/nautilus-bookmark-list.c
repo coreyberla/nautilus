@@ -487,7 +487,7 @@ load_callback (GObject      *source_object,
         {
             insert_bookmark_internal (self, g_object_ref (bookmark), -1);
         }
-        else
+        else if (nautilus_bookmark_has_custom_name (bookmark))
         {
             /* Save only after all pending bookmarks have been merged. */
             g_signal_handlers_block_by_func (existing_bookmark,
@@ -647,11 +647,17 @@ save_file_async (NautilusBookmarkList *self)
     {
         NautilusBookmark *bookmark = NAUTILUS_BOOKMARK (l->data);
 
-        /* Store bookmark URI followed by label */
+        /* Store bookmark URI followed by its custom label, if any */
         g_autofree char *uri = nautilus_bookmark_get_uri (bookmark);
-        const char *label = nautilus_bookmark_get_name (bookmark);
 
-        g_string_append_printf (bookmark_string, "%s %s\n", uri, label);
+        if (nautilus_bookmark_has_custom_name (bookmark))
+        {
+            g_string_append_printf (bookmark_string, "%s %s\n", uri, nautilus_bookmark_get_name (bookmark));
+        }
+        else
+        {
+            g_string_append_printf (bookmark_string, "%s\n", uri);
+        }
     }
 
     task = g_task_new (G_OBJECT (self),

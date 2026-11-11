@@ -41,6 +41,7 @@ struct _NautilusBookmark
     GObject parent_instance;
 
     char *name;
+    gboolean has_custom_name;
     GFile *location;
     GIcon *icon;
     GIcon *symbolic_icon;
@@ -57,9 +58,9 @@ static void nautilus_bookmark_disconnect_file (NautilusBookmark *bookmark);
 
 G_DEFINE_FINAL_TYPE (NautilusBookmark, nautilus_bookmark, G_TYPE_OBJECT);
 
-void
-nautilus_bookmark_set_name (NautilusBookmark *bookmark,
-                            const char       *new_name)
+static void
+update_name (NautilusBookmark *bookmark,
+             const char       *new_name)
 {
     g_autofree char *escaped_name = NULL;
 
@@ -83,7 +84,7 @@ static void
 bookmark_set_name_from_ready_file (NautilusBookmark *self,
                                    NautilusFile     *file)
 {
-    if (self->name != NULL)
+    if (self->has_custom_name)
     {
         return;
     }
@@ -92,13 +93,44 @@ bookmark_set_name_from_ready_file (NautilusBookmark *self,
 
     if (nautilus_file_is_home (self->file))
     {
-        nautilus_bookmark_set_name (self, _("Home"));
+        update_name (self, _("Home"));
     }
     else if (g_strcmp0 (self->name, display_name) != 0)
     {
-        nautilus_bookmark_set_name (self, display_name);
+        update_name (self, display_name);
         g_debug ("%s: name changed to %s", nautilus_bookmark_get_name (self), display_name);
     }
+}
+
+/**
+ * nautilus_bookmark_set_name:
+ * @bookmark: a #NautilusBookmark
+ * @new_name: (nullable): a custom name, or %NULL or an empty string to name
+ *            the bookmark after its location
+ */
+void
+nautilus_bookmark_set_name (NautilusBookmark *bookmark,
+                            const char       *new_name)
+{
+    bookmark->has_custom_name = (new_name != NULL && new_name[0] != '\0');
+
+    if (bookmark->has_custom_name)
+    {
+        update_name (bookmark, new_name);
+    }
+    else if (bookmark->file != NULL &&
+             nautilus_file_check_if_ready (bookmark->file, NAUTILUS_ATTRIBUTE_INFO))
+    {
+        bookmark_set_name_from_ready_file (bookmark, bookmark->file);
+    }
+}
+
+gboolean
+nautilus_bookmark_has_custom_name (NautilusBookmark *bookmark)
+{
+    g_return_val_if_fail (NAUTILUS_IS_BOOKMARK (bookmark), FALSE);
+
+    return bookmark->has_custom_name;
 }
 
 static void
@@ -301,7 +333,7 @@ nautilus_bookmark_connect_file (NautilusBookmark *bookmark)
     {
         g_autofree char *new_name = nautilus_compute_title_for_location (bookmark->location);
 
-        nautilus_bookmark_set_name (bookmark, new_name);
+        update_name (bookmark, new_name);
     }
 }
 

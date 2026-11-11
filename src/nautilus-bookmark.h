@@ -34,5 +34,6 @@ void                  nautilus_bookmark_take_selected_uris     (NautilusBookmark
 GStrv                 nautilus_bookmark_get_selected_uris      (NautilusBookmark      *bookmark);
 void                  nautilus_bookmark_set_name               (NautilusBookmark      *bookmark,
                                                                 const char            *new_name);
+gboolean              nautilus_bookmark_has_custom_name        (NautilusBookmark      *bookmark);
 
 G_END_DECLS

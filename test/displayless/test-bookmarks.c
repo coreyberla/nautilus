@@ -220,6 +220,9 @@ test_bookmark_list_first_load_merge (void)
 
     ITER_CONTEXT_WHILE (!file_has_string (bookmarks_list_file, "Renamed"));
     g_assert_true (file_has_string (bookmarks_list_file, existing_uri));
+    /* The custom name on disk must not be replaced by a default name */
+    g_assert_cmpstr (nautilus_bookmark_get_name (loaded_duplicate), ==, "On disk");
+    g_assert_true (file_has_string (bookmarks_list_file, "On disk"));
     g_assert_true (file_has_string (bookmarks_list_file, new_uri));
     ITER_CONTEXT_WHILE (g_main_context_pending (NULL));
 
