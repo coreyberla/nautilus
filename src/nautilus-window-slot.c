@@ -1905,6 +1905,16 @@ handle_regular_file_if_needed (NautilusWindowSlot *self,
     return needs_regular_file_handling;
 }
 
+static gboolean
+is_unreadable_folder (NautilusFile *file)
+{
+    g_autoptr (GFile) location = nautilus_file_get_location (file);
+
+    return g_file_is_native (location) &&
+           nautilus_file_is_directory (file) &&
+           (!nautilus_file_can_read (file) || !nautilus_file_can_execute (file));
+}
+
 static void
 got_file_info_for_view_selection_callback (NautilusFile *ready_file,
                                            gpointer      callback_data)
@@ -1927,6 +1937,15 @@ got_file_info_for_view_selection_callback (NautilusFile *ready_file,
     else if (nautilus_file_get_file_info_error (ready_file) != NULL)
     {
         error = g_error_copy (nautilus_file_get_file_info_error (ready_file));
+    }
+    else if (is_unreadable_folder (ready_file) &&
+             !(self->location != NULL && g_file_equal (self->location, self->pending_location)))
+    {
+        /* Its contents can't be listed, so treat it like a location which
+         * can't be accessed, rather than showing it empty. When reloading,
+         * the view explains that the contents are unreadable instead. */
+        error = g_error_new_literal (G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+                                     "Permission denied");
     }
 
     if (error == NULL)
