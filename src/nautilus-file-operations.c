@@ -8044,8 +8044,18 @@ compress_task_thread_func (GTask        *task,
                       G_CALLBACK (compress_job_on_error), compress_job);
     g_signal_connect (compressor, "completed",
                       G_CALLBACK (compress_job_on_completed), compress_job);
+
+    gboolean output_existed = g_file_query_exists (compress_job->output_file, NULL);
+
     autoar_compressor_start (compressor,
                              compress_job->common.cancellable);
+
+    if (job_aborted ((CommonJob *) compress_job) && !output_existed)
+    {
+        /* Don't leave an incomplete archive behind after cancellation or
+         * failure. Only remove it if it was created by this job. */
+        g_file_delete (compress_job->output_file, NULL, NULL);
+    }
 
     compress_job->output_archive_exists = g_file_query_exists (compress_job->output_file, NULL);
 
