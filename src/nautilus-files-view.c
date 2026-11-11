@@ -4630,6 +4630,9 @@ load_error_callback (NautilusDirectory *directory,
 {
     NautilusFilesView *view = NAUTILUS_FILES_VIEW (callback_data);
 
+    /* Don't keep showing the contents of the previous location */
+    transition_emit_delayed_signals_if_pending (view);
+
     /* FIXME: By doing a stop, we discard some pending files. Is
      * that OK?
      */
