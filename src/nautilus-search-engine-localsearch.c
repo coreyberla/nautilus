@@ -124,7 +124,14 @@ cursor_callback (GObject      *object,
     mtime_str = tracker_sparql_cursor_get_string (cursor, 2, NULL);
     ctime_str = tracker_sparql_cursor_get_string (cursor, 3, NULL);
     atime_str = tracker_sparql_cursor_get_string (cursor, 4, NULL);
-    basename = g_path_get_basename (uri);
+    /* Unescape the basename of the URI, to match the query against the name */
+    g_autofree gchar *escaped_basename = g_path_get_basename (uri);
+    basename = g_uri_unescape_string (escaped_basename, NULL);
+    if (basename == NULL || !g_utf8_validate (basename, -1, NULL))
+    {
+        g_free (basename);
+        basename = g_steal_pointer (&escaped_basename);
+    }
 
     hit = nautilus_search_hit_new (uri);
     match = nautilus_query_matches_string (nautilus_search_provider_get_query (self), basename);
