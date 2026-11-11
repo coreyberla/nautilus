@@ -158,6 +158,19 @@ test_filename_shortening_with_base_not_needed (void)
     g_assert_cmpstr (filename, ==, desired);
 }
 
+static void
+test_filename_for_link_shortened (void)
+{
+    g_autofree char *name = g_strconcat ("long-name-of-the-target", suffix, NULL);
+    size_t max_length = strlen ("Link to long-name (2)");
+
+    g_autofree char *first_link = nautilus_filename_for_link (name, 1, max_length);
+    g_autofree char *second_link = nautilus_filename_for_link (name, 2, max_length);
+
+    g_assert_cmpstr (first_link, ==, "Link to long-name-of-");
+    g_assert_cmpstr (second_link, ==, "Link to long-name (2)");
+}
+
 int
 main (int   argc,
       char *argv[])
@@ -179,6 +192,8 @@ main (int   argc,
                      test_filename_shortening_with_base);
     g_test_add_func ("/file-name-shortening-with-base/not-needed",
                      test_filename_shortening_with_base_not_needed);
+    g_test_add_func ("/filename-create-link/shortened",
+                     test_filename_for_link_shortened);
     g_test_add_func ("/filename-create-conflict/file",
                      test_filename_create_conflict_name);
 

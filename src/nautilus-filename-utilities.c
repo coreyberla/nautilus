@@ -223,6 +223,27 @@ nautilus_filename_for_copy (const char *name,
                                  parse_previous_copy_name, get_copy_appendix);
 }
 
+static char *
+get_link_name (const char *name,
+               size_t      count)
+{
+    if (count == 0)
+    {
+        /* Use identical name */
+        return g_strdup (name);
+    }
+    else if (count == 1)
+    {
+        /* Translators: File name for new symlink. %s is target's name */
+        return g_strdup_printf (_("Link to %s"), name);
+    }
+    else
+    {
+        /* Translators: File name for new symlink. %s is target's name, %zu is number of symlink. */
+        return g_strdup_printf (_("Link to %s (%zu)"), name, count);
+    }
+}
+
 /**
  * nautilus_filename_for_link:
  * @name: Name of the original file
@@ -241,24 +262,26 @@ nautilus_filename_for_link (const char *name,
 {
     g_assert (name != NULL);
 
-    char *result;
-    if (count == 0)
-    {
-        /* Use identical name */
-        result = g_strdup (name);
-    }
-    else if (count == 1)
-    {
-        /* Translators: File name for new symlink. %s is target's name */
-        result = g_strdup_printf (_("Link to %s"), name);
-    }
-    else
-    {
-        /* Translators: File name for new symlink. %s is target's name, %zu is number of symlink. */
-        result = g_strdup_printf (_("Link to %s (%zu)"), name, count);
-    }
+    char *result = get_link_name (name, count);
+    size_t length = strlen (result);
 
-    nautilus_filename_shorten_base (&result, name, max_length);
+    if (max_length > 0 && length > (size_t) max_length)
+    {
+        /* The target's name isn't necessarily at the end of the link name, so
+         * shorten the target's name itself and create the link name again. */
+        size_t name_length = strlen (name);
+        size_t excess = length - max_length;
+
+        if (excess < name_length)
+        {
+            g_autofree char *short_name = g_strdup (name);
+
+            nautilus_filename_shorten_base (&short_name, name, name_length - excess);
+
+            g_free (result);
+            result = get_link_name (short_name, count);
+        }
+    }
 
     return result;
 }
