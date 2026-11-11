@@ -3365,8 +3365,10 @@ fat_str_replace (char *str,
     success = FALSE;
     for (i = 0; str[i] != '\0'; i++)
     {
+        /* Cast to unsigned, so that bytes of multibyte UTF-8 characters
+         * aren't mistaken for control characters. */
         if (strchr (FAT_FORBIDDEN_CHARACTERS, str[i]) ||
-            str[i] < 32)
+            (guchar) str[i] < 32)
         {
             success = TRUE;
             str[i] = replacement;
