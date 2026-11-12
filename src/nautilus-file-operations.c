@@ -4195,6 +4195,26 @@ copy_move_directory (CopyMoveJob   *copy_job,
 
     if (src_info != NULL)
     {
+        if (!copy_job->is_move &&
+            g_file_info_has_attribute (src_info, G_FILE_ATTRIBUTE_UNIX_MODE))
+        {
+            g_autoptr (GFileInfo) dest_info = NULL;
+
+            /* Like cp, keep the set-group-ID bit that the destination folder
+             * has, e.g. one inherited from its parent folder. */
+            dest_info = g_file_query_info (*dest, G_FILE_ATTRIBUTE_UNIX_MODE,
+                                           G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS,
+                                           job->cancellable, NULL);
+            if (dest_info != NULL &&
+                g_file_info_has_attribute (dest_info, G_FILE_ATTRIBUTE_UNIX_MODE) &&
+                (g_file_info_get_attribute_uint32 (dest_info, G_FILE_ATTRIBUTE_UNIX_MODE) & S_ISGID))
+            {
+                guint32 mode = g_file_info_get_attribute_uint32 (src_info, G_FILE_ATTRIBUTE_UNIX_MODE);
+
+                g_file_info_set_attribute_uint32 (src_info, G_FILE_ATTRIBUTE_UNIX_MODE, mode | S_ISGID);
+            }
+        }
+
         /* Ignore errors here. Failure to copy metadata is not a hard error */
         g_file_set_attributes_from_info (*dest,
                                          src_info,
