@@ -1915,6 +1915,34 @@ is_unreadable_folder (NautilusFile *file)
            (!nautilus_file_can_read (file) || !nautilus_file_can_execute (file));
 }
 
+static AdwTabView *
+get_tab_view (NautilusWindowSlot *self)
+{
+    return ADW_TAB_VIEW (gtk_widget_get_ancestor (GTK_WIDGET (self), ADW_TYPE_TAB_VIEW));
+}
+
+static gboolean
+is_one_of_several_tabs (NautilusWindowSlot *self)
+{
+    AdwTabView *tab_view = get_tab_view (self);
+
+    return tab_view != NULL && adw_tab_view_get_n_pages (tab_view) > 1;
+}
+
+static gboolean
+close_tab_on_idle (gpointer user_data)
+{
+    NautilusWindowSlot *self = NAUTILUS_WINDOW_SLOT (user_data);
+    AdwTabView *tab_view = get_tab_view (self);
+
+    if (tab_view != NULL && self->location == NULL)
+    {
+        adw_tab_view_close_page (tab_view, adw_tab_view_get_page (tab_view, GTK_WIDGET (self)));
+    }
+
+    return G_SOURCE_REMOVE;
+}
+
 static void
 got_file_info_for_view_selection_callback (NautilusFile *ready_file,
                                            gpointer      callback_data)
@@ -1983,7 +2011,15 @@ got_file_info_for_view_selection_callback (NautilusFile *ready_file,
                                                              self->pending_location,
                                                              error);
 
-        if (self->location == NULL)
+        if (self->location == NULL && is_one_of_several_tabs (self))
+        {
+            /* A new tab cannot display its initial URI. It would be of no
+             * use, so close it instead of falling back to $HOME. Do it on
+             * idle, as this callback is still using the slot. */
+            g_idle_add_full (G_PRIORITY_DEFAULT_IDLE, close_tab_on_idle,
+                             g_object_ref (self), g_object_unref);
+        }
+        else if (self->location == NULL)
         {
             /* This happens when a new slot cannot display its initial URI.
              * As usual, fallback to $HOME.
