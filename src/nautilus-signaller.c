@@ -21,6 +21,7 @@ enum
     HISTORY_LIST_CHANGED,
     POPUP_MENU_CHANGED,
     MIME_DATA_CHANGED,
+    DATE_CHANGED,
     LAST_SIGNAL
 };
 
@@ -69,6 +70,16 @@ nautilus_signaller_class_init (NautilusSignallerClass *class)
                       G_TYPE_NONE, 0);
     signals[MIME_DATA_CHANGED] =
         g_signal_new ("mime-data-changed",
+                      G_TYPE_FROM_CLASS (class),
+                      G_SIGNAL_RUN_LAST,
+                      0,
+                      NULL, NULL,
+                      g_cclosure_marshal_VOID__VOID,
+                      G_TYPE_NONE, 0);
+    /* Emitted when the local date changes, as relative dates like "Today"
+     * need to be updated then. */
+    signals[DATE_CHANGED] =
+        g_signal_new ("date-changed",
                       G_TYPE_FROM_CLASS (class),
                       G_SIGNAL_RUN_LAST,
                       0,

@@ -11,6 +11,7 @@
 #include "nautilus-file.h"
 #include "nautilus-global-preferences.h"
 #include "nautilus-image.h"
+#include "nautilus-signaller.h"
 #include "nautilus-tag-manager.h"
 #include "nautilus-ui-utilities.h"
 #include "nautilus-view-item.h"
@@ -499,6 +500,9 @@ nautilus_grid_cell_init (NautilusGridCell *self)
                              G_CALLBACK (on_starred_changed), self, G_CONNECT_DEFAULT);
 
     g_signal_connect_object (nautilus_preferences, "changed::" NAUTILUS_PREFERENCES_DATE_TIME_FORMAT,
+                             G_CALLBACK (update_captions), self,
+                             G_CONNECT_SWAPPED);
+    g_signal_connect_object (nautilus_signaller_get_current (), "date-changed",
                              G_CALLBACK (update_captions), self,
                              G_CONNECT_SWAPPED);
 

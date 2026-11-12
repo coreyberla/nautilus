@@ -8,6 +8,7 @@
 #include "nautilus-date-utilities.h"
 
 #include "nautilus-global-preferences.h"
+#include "nautilus-signaller.h"
 
 #include <gdesktop-enums.h>
 #include <glib.h>
@@ -35,6 +36,32 @@ update_date_format (void)
     use_detailed_date_format = (format == NAUTILUS_DATE_TIME_FORMAT_DETAILED);
 }
 
+static gint current_day_key;
+
+static gint
+get_current_day_key (void)
+{
+    g_autoptr (GDateTime) now = g_date_time_new_now_local ();
+
+    return g_date_time_get_year (now) * 10000 +
+           g_date_time_get_month (now) * 100 +
+           g_date_time_get_day_of_month (now);
+}
+
+static gboolean
+check_date_changed (gpointer user_data)
+{
+    gint day_key = get_current_day_key ();
+
+    if (day_key != current_day_key)
+    {
+        current_day_key = day_key;
+        g_signal_emit_by_name (nautilus_signaller_get_current (), "date-changed");
+    }
+
+    return G_SOURCE_CONTINUE;
+}
+
 void
 nautilus_date_setup_preferences (void)
 {
@@ -49,6 +76,11 @@ nautilus_date_setup_preferences (void)
                               "changed::" NAUTILUS_PREFERENCES_DATE_TIME_FORMAT,
                               G_CALLBACK (update_date_format),
                               NULL);
+
+    /* Check periodically rather than waiting for midnight, as timeouts don't
+     * account for the time the system is suspended. */
+    current_day_key = get_current_day_key ();
+    g_timeout_add_seconds (60, check_date_changed, NULL);
 }
 
 static gchar *

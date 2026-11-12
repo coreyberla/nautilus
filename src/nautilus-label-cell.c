@@ -11,6 +11,7 @@
 
 #include "nautilus-file.h"
 #include "nautilus-global-preferences.h"
+#include "nautilus-signaller.h"
 #include "nautilus-view-item.h"
 
 struct _NautilusLabelCell
@@ -116,6 +117,9 @@ nautilus_label_cell_constructed (GObject *object)
     if (nautilus_file_is_date_sort_attribute_q (self->attribute_q))
     {
         g_signal_connect_object (nautilus_preferences, "changed::" NAUTILUS_PREFERENCES_DATE_TIME_FORMAT,
+                                 G_CALLBACK (update_label), self,
+                                 G_CONNECT_SWAPPED);
+        g_signal_connect_object (nautilus_signaller_get_current (), "date-changed",
                                  G_CALLBACK (update_label), self,
                                  G_CONNECT_SWAPPED);
     }
