@@ -5682,10 +5682,21 @@ nautilus_file_operations_move (GTask        *task,
         return;
     }
 
+    /* Files on the same file system as the destination are still moved
+     * without copying them, e.g. when merging folders, so they don't need
+     * any space. Only check the space when something must be copied. */
+    gboolean needs_copy = FALSE;
+    for (GList *l = fallbacks; l != NULL && !needs_copy; l = l->next)
+    {
+        MoveFileCopyFallback *fallback = l->data;
+
+        needs_copy = dest_fs_id == NULL || !has_fs_id (fallback->file, dest_fs_id);
+    }
+
     verify_destination (&job->common,
                         job->destination,
                         NULL,
-                        &source_info);
+                        needs_copy ? &source_info : NULL);
     if (job_aborted (common))
     {
         return;
