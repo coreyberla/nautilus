@@ -1367,6 +1367,24 @@ nautilus_directory_notify_files_moved (GList *file_pairs)
             /* Handle this as if it was a new file. */
             new_files_list = g_list_prepend (new_files_list,
                                              to_location);
+
+            /* But the old parent still lost an item. */
+            g_autoptr (GFile) from_parent = g_file_get_parent (from_location);
+            NautilusDirectory *from_parent_directory = lookup_existing (from_parent);
+
+            if (from_parent_directory != NULL)
+            {
+                hash_table_add_uncontained (parent_directories, from_parent_directory);
+            }
+            else if (from_parent != NULL)
+            {
+                g_autoptr (NautilusFile) from_parent_file = nautilus_file_get_existing (from_parent);
+
+                if (from_parent_file != NULL)
+                {
+                    nautilus_file_invalidate_count (from_parent_file);
+                }
+            }
         }
         else
         {
