@@ -1538,6 +1538,10 @@ nautilus_window_slot_set_location (NautilusWindowSlot *self,
          * wasn't changed. This is the case for a search.
          */
         nautilus_window_slot_update_title (self);
+
+        /* The history changes when going back or forward to an entry for
+         * the same location. */
+        update_back_forward_actions (self);
         return;
     }
 
@@ -2250,7 +2254,10 @@ nautilus_window_slot_update_bookmark (NautilusWindowSlot *self,
     {
         GFile *bookmark_location;
         bookmark_location = nautilus_bookmark_get_location (self->current_location_bookmark);
-        recreate = !g_file_equal (bookmark_location, new_location);
+        /* Going back or forward always leaves the current history entry,
+         * even for an entry of the same location. */
+        recreate = !g_file_equal (bookmark_location, new_location) ||
+                   self->location_change_distance != 0;
     }
 
     if (recreate)
