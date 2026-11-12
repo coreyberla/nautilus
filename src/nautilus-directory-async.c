@@ -1146,6 +1146,86 @@ nautilus_directory_add_file_monitors (NautilusDirectory *directory,
     nautilus_directory_async_state_changed (directory);
 }
 
+/* Takes the call-when-ready callbacks of a file that is leaving the
+ * directory, so they can follow it to its new directory. */
+FileReadyCallbacks *
+nautilus_directory_remove_file_ready_callbacks (NautilusDirectory *directory,
+                                                NautilusFile      *file)
+{
+    GHashTable *hashes[] =
+    {
+        directory->details->call_when_ready_hash.ready,
+        directory->details->call_when_ready_hash.unsatisfied,
+    };
+    GList *result = NULL;
+
+    g_assert (NAUTILUS_IS_DIRECTORY (directory));
+    g_assert (NAUTILUS_IS_FILE (file));
+    g_assert (file->details->directory == directory);
+
+    for (guint i = 0; i < G_N_ELEMENTS (hashes); i++)
+    {
+        GList *list = g_hash_table_lookup (hashes[i], file);
+
+        if (list == NULL)
+        {
+            continue;
+        }
+
+        g_hash_table_remove (hashes[i], file);
+
+        for (GList *l = list; l != NULL; l = l->next)
+        {
+            ReadyCallback *callback = l->data;
+
+            request_counter_remove (directory->details->call_when_ready_counters,
+                                    callback->attributes);
+        }
+
+        result = g_list_concat (result, list);
+    }
+
+    if (result != NULL)
+    {
+        nautilus_directory_async_state_changed (directory);
+    }
+
+    return (FileReadyCallbacks *) result;
+}
+
+void
+nautilus_directory_add_file_ready_callbacks (NautilusDirectory  *directory,
+                                             NautilusFile       *file,
+                                             FileReadyCallbacks *callbacks)
+{
+    GHashTable *unsatisfied = directory->details->call_when_ready_hash.unsatisfied;
+    GList *list = (GList *) callbacks;
+
+    g_assert (NAUTILUS_IS_DIRECTORY (directory));
+    g_assert (NAUTILUS_IS_FILE (file));
+    g_assert (file->details->directory == directory);
+
+    if (list == NULL)
+    {
+        return;
+    }
+
+    for (GList *l = list; l != NULL; l = l->next)
+    {
+        ReadyCallback *callback = l->data;
+
+        request_counter_add (directory->details->call_when_ready_counters,
+                             callback->attributes);
+    }
+
+    /* Callbacks that were already ready get checked again here. */
+    list = g_list_concat (g_hash_table_lookup (unsatisfied, file), list);
+    g_hash_table_replace (unsatisfied, file, list);
+
+    nautilus_directory_add_file_to_work_queue (directory, file);
+    nautilus_directory_async_state_changed (directory);
+}
+
 static int
 ready_callback_key_compare (gconstpointer a,
                             gconstpointer b)

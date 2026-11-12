@@ -1323,7 +1323,10 @@ nautilus_directory_notify_files_moved (GList *file_pairs)
     g_autoptr (GHashTable) parent_directories =
         g_hash_table_new_full (NULL, NULL, (GDestroyNotify) nautilus_directory_unref, NULL);
 
-    NautilusAttributes cancel_attributes = nautilus_file_get_all_attributes ();
+    /* The old directory may also be loading the filesystem info of a moved
+     * file, which "all attributes" doesn't include. */
+    NautilusAttributes cancel_attributes = nautilus_file_get_all_attributes () |
+                                           NAUTILUS_ATTRIBUTE_FILESYSTEM_INFO;
 
     for (GList *p = file_pairs; p != NULL; p = p->next)
     {
@@ -1372,10 +1375,6 @@ nautilus_directory_notify_files_moved (GList *file_pairs)
             /* Handle notification in the old directory. */
             hash_table_add_uncontained (parent_directories, old_directory);
 
-            /* Cancel loading of attributes in the old directory */
-            nautilus_directory_cancel_loading_attributes
-                (old_directory, from_file, cancel_attributes);
-
             /* Locate the new directory. */
             g_autoptr (NautilusDirectory) new_directory = get_parent_directory (to_location);
             hash_table_add_uncontained (parent_directories, new_directory);
@@ -1383,6 +1382,12 @@ nautilus_directory_notify_files_moved (GList *file_pairs)
             /* Update the file's name and directory. */
             g_autofree char *name = g_file_get_basename (to_location);
             nautilus_file_update_name_and_directory (from_file, name, new_directory);
+
+            /* Cancel loading of attributes in the old directory. Only do it
+             * after the file has left it, or the old directory would restart
+             * loading them right away. */
+            nautilus_directory_cancel_loading_attributes
+                (old_directory, from_file, cancel_attributes);
 
             /* Update file attributes */
             nautilus_file_invalidate_attributes (from_file, NAUTILUS_ATTRIBUTE_INFO);

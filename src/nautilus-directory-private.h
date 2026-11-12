@@ -17,6 +17,7 @@
 #include <nautilus-extension.h>
 
 typedef struct FileMonitors FileMonitors;
+typedef struct FileReadyCallbacks FileReadyCallbacks;
 typedef struct DirectoryLoadState DirectoryLoadState;
 typedef struct DirectoryCountState DirectoryCountState;
 typedef struct DeepCountState DeepCountState;
@@ -181,6 +182,11 @@ FileMonitors *     nautilus_directory_remove_file_monitors            (NautilusD
 void               nautilus_directory_add_file_monitors               (NautilusDirectory         *directory,
 								       NautilusFile              *file,
 								       FileMonitors              *monitors);
+FileReadyCallbacks *nautilus_directory_remove_file_ready_callbacks     (NautilusDirectory         *directory,
+								       NautilusFile              *file);
+void               nautilus_directory_add_file_ready_callbacks        (NautilusDirectory         *directory,
+								       NautilusFile              *file,
+								       FileReadyCallbacks        *callbacks);
 GList *            nautilus_directory_begin_file_name_change          (NautilusDirectory         *directory,
 								       NautilusFile              *file);
 void               nautilus_directory_end_file_name_change            (NautilusDirectory         *directory,

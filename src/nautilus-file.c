@@ -2954,6 +2954,7 @@ nautilus_file_update_name_and_directory (NautilusFile      *file,
 {
     NautilusDirectory *old_directory;
     FileMonitors *monitors;
+    FileReadyCallbacks *callbacks;
 
     g_return_val_if_fail (NAUTILUS_IS_FILE (file), FALSE);
     g_return_val_if_fail (NAUTILUS_IS_DIRECTORY (file->details->directory), FALSE);
@@ -2983,6 +2984,7 @@ nautilus_file_update_name_and_directory (NautilusFile      *file,
     remove_from_link_hash_table (file);
 
     monitors = nautilus_directory_remove_file_monitors (old_directory, file);
+    callbacks = nautilus_directory_remove_file_ready_callbacks (old_directory, file);
     nautilus_directory_remove_file (old_directory, file);
 
     nautilus_file_set_directory (file, new_directory);
@@ -2994,6 +2996,7 @@ nautilus_file_update_name_and_directory (NautilusFile      *file,
 
     nautilus_directory_add_file (new_directory, file);
     nautilus_directory_add_file_monitors (new_directory, file, monitors);
+    nautilus_directory_add_file_ready_callbacks (new_directory, file, callbacks);
 
     add_to_link_hash_table (file);
 
