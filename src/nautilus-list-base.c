@@ -59,6 +59,9 @@ struct _NautilusListBasePrivate
 
     gdouble amount_scrolled_for_zoom;
     guint scroll_timeout_id;
+
+    guint restore_scroll_id;
+    gdouble scroll_before_sort;
 };
 
 G_DEFINE_ABSTRACT_TYPE_WITH_PRIVATE (NautilusListBase, nautilus_list_base, ADW_TYPE_BIN)
@@ -981,6 +984,39 @@ get_first_selected_item (NautilusListBase *self)
     return gtk_bitset_get_minimum (selection);
 }
 
+static void
+restore_scroll_unless_selected (gpointer user_data)
+{
+    NautilusListBase *self = user_data;
+    NautilusListBasePrivate *priv = nautilus_list_base_get_instance_private (self);
+    GtkAdjustment *vadjustment = gtk_scrolled_window_get_vadjustment (GTK_SCROLLED_WINDOW (priv->scrolled_window));
+
+    priv->restore_scroll_id = 0;
+
+    if (priv->model == NULL || get_first_selected_item (self) != G_MAXUINT)
+    {
+        return;
+    }
+
+    gtk_adjustment_set_value (vadjustment, priv->scroll_before_sort);
+}
+
+static void
+on_sort_state_changed (NautilusListBase *self)
+{
+    NautilusListBasePrivate *priv = nautilus_list_base_get_instance_private (self);
+    GtkAdjustment *vadjustment = gtk_scrolled_window_get_vadjustment (GTK_SCROLLED_WINDOW (priv->scrolled_window));
+
+    /* When sorting, GTK keeps the focused item in view. With nothing selected
+     * the focus is not visible, so the view would seem to jump to a random
+     * position. Keep the scroll position instead, once the items are sorted. */
+    if (priv->restore_scroll_id == 0)
+    {
+        priv->scroll_before_sort = gtk_adjustment_get_value (vadjustment);
+        priv->restore_scroll_id = g_idle_add_once (restore_scroll_unless_selected, self);
+    }
+}
+
 /**
  * Gets widget to point a popover to. E.g. rename popover, selection menu.
  *
@@ -1059,6 +1095,7 @@ nautilus_list_base_dispose (GObject *object)
     g_clear_object (&priv->model);
     g_clear_handle_id (&priv->hover_timer_id, g_source_remove);
     g_clear_handle_id (&priv->scroll_timeout_id, g_source_remove);
+    g_clear_handle_id (&priv->restore_scroll_id, g_source_remove);
 
     G_OBJECT_CLASS (nautilus_list_base_parent_class)->dispose (object);
 }
@@ -1330,6 +1367,9 @@ nautilus_list_base_init (NautilusListBase *self)
                              G_CALLBACK (set_click_mode_from_settings), self,
                              G_CONNECT_SWAPPED);
     set_click_mode_from_settings (self);
+
+    g_signal_connect (self, "notify::sort-state",
+                      G_CALLBACK (on_sort_state_changed), NULL);
 }
 
 NautilusFile *
