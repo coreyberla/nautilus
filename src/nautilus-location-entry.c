@@ -186,6 +186,30 @@ set_position_and_selection_to_end (GtkEditable *editable)
     gtk_editable_set_position (editable, end);
 }
 
+/* The parse names of remote locations keep ASCII characters escaped, e.g.
+ * "dav://host/A%20B". Unescape them for display, except for those that would
+ * not parse back to the same location. */
+static char *
+get_display_text (GFile *location)
+{
+    g_autofree char *parse_name = g_file_get_parse_name (location);
+
+    if (g_file_is_native (location))
+    {
+        return g_steal_pointer (&parse_name);
+    }
+
+    /* An escaped "/" is part of a name, so it can't be unescaped. */
+    g_autofree char *unescaped = g_uri_unescape_string (parse_name, "/");
+
+    if (unescaped == NULL || !g_utf8_validate (unescaped, -1, NULL))
+    {
+        return g_steal_pointer (&parse_name);
+    }
+
+    return g_uri_escape_string (unescaped, "!$&'()*+,;=:@/[] ", TRUE);
+}
+
 void
 nautilus_location_entry_set_location (NautilusLocationEntry *self,
                                       GFile                 *location)
@@ -205,7 +229,7 @@ nautilus_location_entry_set_location (NautilusLocationEntry *self,
     {
         g_set_object (&self->current_location, location);
 
-        g_autofree gchar *formatted_uri = g_file_get_parse_name (location);
+        g_autofree gchar *formatted_uri = get_display_text (location);
 
         nautilus_location_entry_set_text (self, formatted_uri);
         set_position_and_selection_to_end (GTK_EDITABLE (self));
