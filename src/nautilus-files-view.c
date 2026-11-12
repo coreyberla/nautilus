@@ -2652,6 +2652,25 @@ paste_callback_data_free (PasteCallbackData *data)
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (PasteCallbackData, paste_callback_data_free)
 
+static gboolean
+is_any_item_destination_or_ancestor (GList      *item_uris,
+                                     const char *destination_uri)
+{
+    g_autoptr (GFile) destination = g_file_new_for_uri (destination_uri);
+
+    for (GList *l = item_uris; l != NULL; l = l->next)
+    {
+        g_autoptr (GFile) item = g_file_new_for_uri (l->data);
+
+        if (g_file_equal (item, destination) || g_file_has_prefix (destination, item))
+        {
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
 static void
 handle_clipboard_data (NautilusFilesView *view,
                        GList             *item_uris,
@@ -2663,8 +2682,10 @@ handle_clipboard_data (NautilusFilesView *view,
         nautilus_files_view_move_copy_items (view, item_uris, destination_uri,
                                              action);
 
-        /* If items are cut then remove from clipboard */
-        if (action == GDK_ACTION_MOVE)
+        /* If items are cut then remove from clipboard, unless they can't be
+         * moved there, so they can still be pasted somewhere else. */
+        if (action == GDK_ACTION_MOVE &&
+            !is_any_item_destination_or_ancestor (item_uris, destination_uri))
         {
             gdk_clipboard_set_content (gtk_widget_get_clipboard (GTK_WIDGET (view)),
                                        NULL);
@@ -8469,7 +8490,8 @@ nautilus_files_view_move_copy_items (NautilusFilesView *view,
 
         return;
     }
-    else if (copy_action == GDK_ACTION_MOVE)
+    else if (copy_action == GDK_ACTION_MOVE &&
+             !is_any_item_destination_or_ancestor ((GList *) item_uris, target_uri))
     {
         nautilus_clipboard_clear_if_colliding_uris (GTK_WIDGET (view),
                                                     item_uris);
