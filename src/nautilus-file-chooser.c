@@ -380,7 +380,20 @@ update_cursor (NautilusFileChooser *self)
     }
 }
 
-static void
+static gboolean
+can_browse_location (GFile *location)
+{
+    const char * const *supported_schemes = g_vfs_get_supported_uri_schemes (g_vfs_get_default ());
+    g_autofree char *scheme = g_file_get_uri_scheme (location);
+
+    /* Web locations can't be listed, so their folders can't be shown. */
+    return scheme != NULL &&
+           g_strv_contains (supported_schemes, scheme) &&
+           g_strcmp0 (scheme, "http") != 0 &&
+           g_strcmp0 (scheme, "https") != 0;
+}
+
+static gboolean
 on_file_drop (GtkDropTarget *target,
               const GValue  *value,
               gdouble        x,
@@ -389,7 +402,12 @@ on_file_drop (GtkDropTarget *target,
 {
     GSList *locations = g_value_get_boxed (value);
 
-    g_return_if_fail (locations != NULL);
+    g_return_val_if_fail (locations != NULL, FALSE);
+
+    if (!can_browse_location (locations->data))
+    {
+        return FALSE;
+    }
 
     g_autolist (NautilusFile) selection = NULL;
     g_autoptr (GFile) location = NULL;
@@ -415,6 +433,8 @@ on_file_drop (GtkDropTarget *target,
     }
 
     nautilus_window_slot_open_location_full (self->slot, location, selection);
+
+    return TRUE;
 }
 
 static void
