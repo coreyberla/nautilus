@@ -1748,6 +1748,30 @@ trash_retrieve_files_to_restore_thread (GTask        *task,
     GError *error = NULL;
     gboolean restored_at_least_once = FALSE;
 
+    /* The original path of a file trashed on another file system has the
+     * symbolic links in its folder resolved, so also look the trashed files
+     * up that way. */
+    g_autoptr (GHashTable) trashed_resolved = g_hash_table_new_full (g_file_hash, (GEqualFunc) g_file_equal,
+                                                                     g_object_unref, NULL);
+    GHashTableIter iter;
+    gpointer key, value;
+
+    g_hash_table_iter_init (&iter, self->trashed);
+    while (g_hash_table_iter_next (&iter, &key, &value))
+    {
+        g_autoptr (GFile) parent = g_file_get_parent (G_FILE (key));
+        g_autofree char *parent_path = (parent != NULL) ? g_file_get_path (parent) : NULL;
+        g_autofree char *resolved_parent_path = (parent_path != NULL) ? realpath (parent_path, NULL) : NULL;
+
+        if (resolved_parent_path != NULL && g_strcmp0 (resolved_parent_path, parent_path) != 0)
+        {
+            g_autofree char *basename = g_file_get_basename (G_FILE (key));
+            g_autofree char *resolved_path = g_build_filename (resolved_parent_path, basename, NULL);
+
+            g_hash_table_insert (trashed_resolved, g_file_new_for_path (resolved_path), value);
+        }
+    }
+
     trash = g_file_new_for_uri (SCHEME_TRASH ":///");
 
     enumerator = g_file_enumerate_children (trash,
@@ -1774,6 +1798,10 @@ trash_retrieve_files_to_restore_thread (GTask        *task,
             origfile = g_file_new_for_path (origpath);
 
             lookupvalue = g_hash_table_lookup (self->trashed, origfile);
+            if (lookupvalue == NULL)
+            {
+                lookupvalue = g_hash_table_lookup (trashed_resolved, origfile);
+            }
 
             if (lookupvalue)
             {
