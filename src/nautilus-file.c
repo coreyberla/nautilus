@@ -2426,7 +2426,10 @@ update_info_internal (NautilusFile *file,
                                                edit_name,
                                                FALSE);
 
-    file_type = g_file_info_get_file_type (info);
+    /* The type is missing if it couldn't be determined, e.g. for a file
+     * in a folder that isn't searchable. */
+    file_type = g_file_info_has_attribute (info, G_FILE_ATTRIBUTE_STANDARD_TYPE) ?
+                g_file_info_get_file_type (info) : G_FILE_TYPE_UNKNOWN;
     if (file->details->type != file_type)
     {
         changed = TRUE;
@@ -2655,21 +2658,21 @@ update_info_internal (NautilusFile *file,
     {
         changed = TRUE;
         g_clear_pointer (&file->details->owner, g_ref_string_release);
-        file->details->owner = g_ref_string_new_intern (owner);
+        file->details->owner = (owner != NULL) ? g_ref_string_new_intern (owner) : NULL;
     }
 
     if (g_strcmp0 (file->details->owner_real, owner_real) != 0)
     {
         changed = TRUE;
         g_clear_pointer (&file->details->owner_real, g_ref_string_release);
-        file->details->owner_real = g_ref_string_new_intern (owner_real);
+        file->details->owner_real = (owner_real != NULL) ? g_ref_string_new_intern (owner_real) : NULL;
     }
 
     if (g_strcmp0 (file->details->group, group) != 0)
     {
         changed = TRUE;
         g_clear_pointer (&file->details->group, g_ref_string_release);
-        file->details->group = g_ref_string_new_intern (group);
+        file->details->group = (group != NULL) ? g_ref_string_new_intern (group) : NULL;
     }
 
     if (free_owner)
@@ -2757,7 +2760,7 @@ update_info_internal (NautilusFile *file,
     {
         changed = TRUE;
         g_clear_pointer (&file->details->mime_type, g_ref_string_release);
-        file->details->mime_type = g_ref_string_new_intern (mime_type);
+        file->details->mime_type = (mime_type != NULL) ? g_ref_string_new_intern (mime_type) : NULL;
     }
 
     selinux_context = g_file_info_get_attribute_string (info, G_FILE_ATTRIBUTE_SELINUX_CONTEXT);
@@ -2771,7 +2774,7 @@ update_info_internal (NautilusFile *file,
     {
         changed = TRUE;
         g_clear_pointer (&file->details->filesystem_id, g_ref_string_release);
-        file->details->filesystem_id = g_ref_string_new_intern (filesystem_id);
+        file->details->filesystem_id = (filesystem_id != NULL) ? g_ref_string_new_intern (filesystem_id) : NULL;
     }
 
     trash_time = 0;
