@@ -3883,6 +3883,27 @@ nautilus_file_is_hidden_file (NautilusFile *file)
  *
  * Returns: %TRUE if the file should be shown, %FALSE if it shouldn't.
  */
+static gboolean
+is_in_hidden_folder (GFile *location)
+{
+    g_autoptr (GFile) folder = g_file_get_parent (location);
+
+    while (folder != NULL)
+    {
+        g_autofree char *name = g_file_get_basename (folder);
+        g_autoptr (GFile) parent = g_file_get_parent (folder);
+
+        if (name != NULL && name[0] == '.')
+        {
+            return TRUE;
+        }
+
+        g_set_object (&folder, parent);
+    }
+
+    return FALSE;
+}
+
 gboolean
 nautilus_file_should_show (NautilusFile *file,
                            gboolean      show_hidden)
@@ -3898,6 +3919,18 @@ nautilus_file_should_show (NautilusFile *file,
         nautilus_file_is_hidden_file (file))
     {
         return FALSE;
+    }
+
+    if (!show_hidden && nautilus_file_is_in_recent (file))
+    {
+        /* Recent files are listed apart from their folders, so also hide
+         * those in hidden folders. */
+        g_autoptr (GFile) location = nautilus_file_get_activation_location (file);
+
+        if (is_in_hidden_folder (location))
+        {
+            return FALSE;
+        }
     }
 
     return TRUE;
