@@ -2523,9 +2523,14 @@ setup_open_in_disks (NautilusPropertiesWidget *self)
                                                   ? g_unix_mount_entry_at (path, NULL)
                                                   : NULL;
 
-        if (mount_entry != NULL)
+        const char *device_path = (mount_entry != NULL)
+                                  ? g_unix_mount_entry_get_device_path (mount_entry)
+                                  : NULL;
+
+        /* Disks can only open block devices, not e.g. "overlay" or "composefs". */
+        if (device_path != NULL && g_str_has_prefix (device_path, "/dev/"))
         {
-            self->device_identifier = g_strdup (g_unix_mount_entry_get_device_path (mount_entry));
+            self->device_identifier = g_strdup (device_path);
         }
     }
 
