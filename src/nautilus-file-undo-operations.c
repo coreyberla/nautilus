@@ -437,7 +437,7 @@ ext_strings_func (NautilusFileUndoInfo  *info,
     NautilusFileUndoInfoExt *self = NAUTILUS_FILE_UNDO_INFO_EXT (info);
     NautilusFileUndoOp op_type = nautilus_file_undo_info_get_op_type (info);
     gint count = nautilus_file_undo_info_get_item_count (info);
-    const gchar *source = g_file_peek_path (self->src_dir);
+    const gchar *source = (self->src_dir != NULL) ? g_file_peek_path (self->src_dir) : NULL;
     const gchar *destination = g_file_peek_path (self->dest_dir);
     g_autofree gchar *name = NULL;
 
@@ -788,7 +788,7 @@ nautilus_file_undo_info_ext_new (NautilusFileUndoOp  op_type,
                          "item-count", item_count,
                          NULL);
 
-    self->src_dir = g_object_ref (src_dir);
+    self->src_dir = (src_dir != NULL) ? g_object_ref (src_dir) : NULL;
     self->dest_dir = g_object_ref (target_dir);
     self->sources = g_queue_new ();
     self->destinations = g_queue_new ();

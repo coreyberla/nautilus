@@ -3423,6 +3423,33 @@ make_file_name_valid_for_dest_fs (char       *filename,
     return FALSE;
 }
 
+/* Returns the base name to use for a copy or link of @src. The base name of
+ * the root of a location, like "https://example.com/", is "/", which can't
+ * be used as a file name, so fall back to its host, or else its scheme. */
+static char *
+get_target_basename (GFile *src)
+{
+    g_autofree char *basename = g_file_get_basename (src);
+    g_autofree char *uri = NULL;
+    g_autoptr (GUri) parsed_uri = NULL;
+    const char *host;
+
+    if (basename != NULL && strchr (basename, G_DIR_SEPARATOR) == NULL)
+    {
+        return g_steal_pointer (&basename);
+    }
+
+    uri = g_file_get_uri (src);
+    parsed_uri = g_uri_parse (uri, G_URI_FLAGS_NONE, NULL);
+    host = (parsed_uri != NULL) ? g_uri_get_host (parsed_uri) : NULL;
+    if (host != NULL && *host != '\0' && strchr (host, G_DIR_SEPARATOR) == NULL)
+    {
+        return g_strdup (host);
+    }
+
+    return g_file_get_uri_scheme (src);
+}
+
 static GFile *
 get_unique_target_file (GFile        *src,
                         GFile        *dest_dir,
@@ -3462,7 +3489,7 @@ get_unique_target_file (GFile        *src,
 
     if (dest == NULL)
     {
-        basename = g_file_get_basename (src);
+        basename = get_target_basename (src);
         g_assert (basename != NULL);
 
         if (g_utf8_validate (basename, -1, NULL))
@@ -3527,7 +3554,7 @@ get_target_file_for_link (GFile      *src,
 
     if (dest == NULL)
     {
-        basename = g_file_get_basename (src);
+        basename = get_target_basename (src);
         make_file_name_valid_for_dest_fs (basename, dest_fs_type);
 
         if (g_utf8_validate (basename, -1, NULL))
@@ -3619,7 +3646,7 @@ get_target_file_with_custom_name (GFile       *src,
 
     if (dest == NULL)
     {
-        basename = g_file_get_basename (src);
+        basename = get_target_basename (src);
         make_file_name_valid_for_dest_fs (basename, dest_fs_type);
         dest = g_file_get_child (dest_dir, basename);
         g_free (basename);
