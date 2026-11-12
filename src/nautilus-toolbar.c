@@ -75,8 +75,13 @@ toolbar_update_appearance (NautilusToolbar *self)
                           g_settings_get_boolean (nautilus_preferences,
                                                   NAUTILUS_PREFERENCES_ALWAYS_USE_LOCATION_ENTRY);
 
-    if (self->window_slot != NULL &&
-        nautilus_window_slot_get_search_visible (self->window_slot))
+    if (self->show_location_entry)
+    {
+        /* Explicitly requested, so show it even over the search entry. */
+        gtk_stack_set_visible_child_name (GTK_STACK (self->toolbar_switcher), "location");
+    }
+    else if (self->window_slot != NULL &&
+             nautilus_window_slot_get_search_visible (self->window_slot))
     {
         gtk_stack_set_visible_child_name (GTK_STACK (self->toolbar_switcher), "search");
     }
