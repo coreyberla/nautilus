@@ -349,7 +349,7 @@ template $NautilusBatchRenameDialog: Adw.Dialog {
                   spacing: 6;
                   css-classes: bind $batch_row_conflict_css_name(
                     template.item as <$NautilusBatchRenameItem>.has-conflict
-                    );
+                    ) as <$GStrv>;
 
                   Label original_name_label {
                     hexpand: true;
