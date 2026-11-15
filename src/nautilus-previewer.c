@@ -223,6 +223,18 @@ handle_previewer_event (GDBusConnection *connection,
         return;
     }
 
+    /* The previewer may be shared with another Nautilus instance (e.g. stable
+     * and development builds both falling back to the same Sushi). Only react
+     * to events while the previewer is parented to our window. Sushi < 45
+     * doesn't expose ParentHandle, in which case we can't tell. */
+    g_autoptr (GVariant) parent_handle = g_dbus_proxy_get_cached_property (previewer_proxy,
+                                                                           "ParentHandle");
+    if (parent_handle != NULL &&
+        g_strcmp0 (g_variant_get_string (parent_handle, NULL), exported_window_handle) != 0)
+    {
+        return;
+    }
+
     callback (files_view, parameters);
 }
 
