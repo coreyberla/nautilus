@@ -15,8 +15,10 @@
 #include <glib/gi18n.h>
 #include <locale.h>
 
+#include <unicode/ucal.h>
 #include <unicode/udatpg.h>
 #include <unicode/ureldatefmt.h>
+#include <unicode/ustring.h>
 
 static gboolean use_24_hour;
 static gboolean use_detailed_date_format;
@@ -364,12 +366,50 @@ ensure_icu_locale (void)
     }
 }
 
+/* Converts a GLib time zone identifier into an ICU one. Returns its length,
+ * or -1 if ICU's default time zone should be used instead: when ICU doesn't
+ * know the zone, or for "UTC", which GLib also reports when it can't tell what
+ * the local time zone is (e.g. /etc/localtime isn't a symlink), while ICU's
+ * own detection may still find it. */
+static gint32
+time_zone_id_to_icu (const char *tz_id,
+                     UChar      *icu_tz_id,
+                     gint32      icu_tz_id_capacity)
+{
+    UErrorCode status = U_ZERO_ERROR;
+    UChar canonical_id[128];
+    UBool is_system_id = FALSE;
+
+    if (tz_id == NULL ||
+        g_str_equal (tz_id, "UTC") ||
+        strlen (tz_id) >= (gsize) icu_tz_id_capacity)
+    {
+        return -1;
+    }
+
+    u_uastrncpy (icu_tz_id, tz_id, icu_tz_id_capacity);
+    ucal_getCanonicalTimeZoneID (icu_tz_id, -1,
+                                 canonical_id, G_N_ELEMENTS (canonical_id),
+                                 &is_system_id, &status);
+
+    if (U_FAILURE (status) || !is_system_id)
+    {
+        return -1;
+    }
+
+    return u_strlen (icu_tz_id);
+}
+
 static UErrorCode
 ensure_formatters (GTimeZone *new_tz)
 {
     static UErrorCode status = U_ZERO_ERROR;
     static UDateTimePatternGenerator *pattern_gen;
     static gchar *tz_id;
+    /* ICU detects its default time zone only once, so the formatters must be
+     * given the current one explicitly to follow time zone changes. */
+    static UChar icu_tz_id[128];
+    static gint32 icu_tz_id_len = -1;
 
     if (U_FAILURE (status))
     {
@@ -410,11 +450,14 @@ ensure_formatters (GTimeZone *new_tz)
         g_clear_pointer (&datetime_short_24_hour_formatter, udat_close);
         g_clear_pointer (&datetime_detailed_12_hour_formatter, udat_close);
         g_clear_pointer (&datetime_detailed_24_hour_formatter, udat_close);
+
+        icu_tz_id_len = time_zone_id_to_icu (tz_id, icu_tz_id, G_N_ELEMENTS (icu_tz_id));
     }
 
     if (time_12_hour_formatter == NULL)
     {
-        gregorian_cal = ucal_open (NULL, -1, icu_locale, UCAL_GREGORIAN, &status);
+        gregorian_cal = ucal_open (icu_tz_id_len >= 0 ? icu_tz_id : NULL, icu_tz_id_len,
+                                   icu_locale, UCAL_GREGORIAN, &status);
 
         if (U_FAILURE (status))
         {
@@ -460,7 +503,8 @@ ensure_formatters (GTimeZone *new_tz)
             *formatter_setup[i].formatter = udat_open (formatter_setup[i].time_style,
                                                        formatter_setup[i].date_style,
                                                        icu_locale,
-                                                       0, -1,
+                                                       icu_tz_id_len >= 0 ? icu_tz_id : NULL,
+                                                       icu_tz_id_len,
                                                        buffer, buffer_len,
                                                        &status);
 
