@@ -18,6 +18,7 @@
 #include "nautilus-file.h"
 #include "nautilus-scheme.h"
 #include "nautilus-tag-manager.h"
+#include "nautilus-ui-utilities.h"
 
 
 /* Since we use g_get_current_time for setting "orig_trash_time" in the undo
@@ -1683,7 +1684,7 @@ trash_retrieve_files_to_restore_thread (GTask        *task,
     GFileEnumerator *enumerator;
     GFile *trash;
     GError *error = NULL;
-    gboolean restored_at_least_once = FALSE;
+    gssize n_restored = 0;
 
     trash = g_file_new_for_uri (SCHEME_TRASH ":///");
 
@@ -1730,10 +1731,12 @@ trash_retrieve_files_to_restore_thread (GTask        *task,
                     /* File in the trash */
                     g_autoptr (GFile) item = g_file_get_child (trash, g_file_info_get_name (info));
 
-                    restored_at_least_once = TRUE;
-                    g_file_move (item, origfile,
-                                 G_FILE_COPY_NOFOLLOW_SYMLINKS,
-                                 NULL, NULL, NULL, NULL);
+                    if (g_file_move (item, origfile,
+                                     G_FILE_COPY_NOFOLLOW_SYMLINKS,
+                                     NULL, NULL, NULL, NULL))
+                    {
+                        n_restored++;
+                    }
                 }
             }
 
@@ -1750,7 +1753,7 @@ trash_retrieve_files_to_restore_thread (GTask        *task,
     }
     else
     {
-        g_task_return_boolean (task, restored_at_least_once);
+        g_task_return_int (task, n_restored);
     }
 }
 
@@ -1774,11 +1777,44 @@ trash_retrieve_files_ready (GObject      *source,
                             gpointer      user_data)
 {
     NautilusFileUndoInfoTrash *self = NAUTILUS_FILE_UNDO_INFO_TRASH (source);
-    g_autoptr (GError) error = NULL;
-    gboolean success = g_task_propagate_boolean (G_TASK (res), &error);
+    g_autoptr (GtkWindow) parent_window = user_data;
+    /* -1 if the trash could not be read at all */
+    gssize n_restored = g_task_propagate_int (G_TASK (res), NULL);
+    gssize n_failed = g_hash_table_size (self->trashed) - MAX (n_restored, 0);
+
+    if (n_failed > 0)
+    {
+        g_autofree char *heading = NULL;
+
+        if (n_restored > 0)
+        {
+            heading = g_strdup_printf (ngettext ("%zd of %u item could not be restored from the trash",
+                                                 "%zd of %u items could not be restored from the trash",
+                                                 g_hash_table_size (self->trashed)),
+                                       n_failed, g_hash_table_size (self->trashed));
+        }
+        else if (n_failed == 1)
+        {
+            g_autoptr (GList) files = g_hash_table_get_keys (self->trashed);
+            g_autofree char *name = g_file_get_basename (files->data);
+
+            heading = g_strdup_printf (_("“%s” could not be restored from the trash"), name);
+        }
+        else
+        {
+            heading = g_strdup_printf (ngettext ("%zd item could not be restored from the trash",
+                                                 "%zd items could not be restored from the trash",
+                                                 n_failed),
+                                       n_failed);
+        }
+
+        nautilus_show_ok_dialog (heading,
+                                 _("Items that are still in the trash can be restored from there."),
+                                 GTK_WIDGET (parent_window));
+    }
 
     /* Here we must do what's necessary for the callback */
-    file_undo_info_transfer_callback (NULL, success, self);
+    file_undo_info_transfer_callback (NULL, n_restored > 0, self);
 }
 
 static void
@@ -1788,7 +1824,8 @@ trash_undo_func (NautilusFileUndoInfo           *info,
 {
     NautilusFileUndoInfoTrash *self = NAUTILUS_FILE_UNDO_INFO_TRASH (info);
 
-    trash_retrieve_files_to_restore_async (self, trash_retrieve_files_ready, NULL);
+    trash_retrieve_files_to_restore_async (self, trash_retrieve_files_ready,
+                                           parent_window != NULL ? g_object_ref (parent_window) : NULL);
 }
 
 static void
