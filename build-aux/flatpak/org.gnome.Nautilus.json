@@ -240,6 +240,25 @@
           "dest": "subprojects/libgxdp"
         }
       ]
+    },
+    {
+      "name": "nautilus-python",
+      "buildsystem": "meson",
+      "config-opts": [
+        "-Ddocs=disabled"
+      ],
+      "sources": [
+        {
+          "type": "git",
+          "url": "https://gitlab.gnome.org/GNOME/nautilus-python.git",
+          "tag": "4.2.0",
+          "commit": "17e7edf4d01bc43d0d550c5013d45659ac752cab"
+        },
+        {
+          "type": "patch",
+          "path": "nautilus-python-host-data-dir.patch"
+        }
+      ]
     }
   ]
 }

@@ -1,0 +1,34 @@
+Also load extensions from the host user's data folder in Flatpak
+
+Inside a Flatpak sandbox, XDG_DATA_HOME points at the app's private data
+folder (~/.var/app/<app-id>/data), so scripts in the usual
+~/.local/share/nautilus-python/extensions are not found. When running in
+Flatpak, also scan $HOST_XDG_DATA_HOME, or ~/.local/share if that is
+unset. Scripts with the same module name are still only loaded once.
+
+--- a/src/nautilus-python.c
++++ b/src/nautilus-python.c
+@@ -243,6 +243,23 @@
+     g_autofree char* user_dir = g_build_filename(g_get_user_data_dir(), "nautilus-python", "extensions", NULL);
+     nautilus_python_load_dir(module, user_dir, loaded_modules);
+ 
++    // Inside a Flatpak sandbox, XDG_DATA_HOME points at the app's private
++    // data folder, so also check the host user's data folder. This only
++    // finds anything if the app has been given access to it.
++    if (g_file_test("/.flatpak-info", G_FILE_TEST_EXISTS)) {
++        const char *host_data_home = g_getenv("HOST_XDG_DATA_HOME");
++        g_autofree char *host_dir = NULL;
++
++        if (host_data_home != NULL && host_data_home[0] != '\0')
++            host_dir = g_build_filename(host_data_home, "nautilus-python", "extensions", NULL);
++        else
++            host_dir = g_build_filename(g_get_home_dir(), ".local", "share",
++                                        "nautilus-python", "extensions", NULL);
++
++        if (g_strcmp0(host_dir, user_dir) != 0)
++            nautilus_python_load_dir(module, host_dir, loaded_modules);
++    }
++
+     // If nautilus is built in a non-standard prefix
+     // Check nautilus prefix's DATADIR
+     char *prefix_extension_dir = DATADIR "/nautilus-python/extensions";
