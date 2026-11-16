@@ -174,31 +174,39 @@ nautilus_module_get_installed_module_names (void)
 }
 
 static void
-load_module_dir (const char *dirname)
+load_module_dir (const char *dirname,
+                 GHashTable *loaded_names)
 {
-    GDir *dir;
+    g_autoptr (GDir) dir = g_dir_open (dirname, 0, NULL);
+    const char *name;
 
-    dir = g_dir_open (dirname, 0, NULL);
-
-    if (dir)
+    if (dir == NULL)
     {
-        const char *name;
+        return;
+    }
 
-        while ((name = g_dir_read_name (dir)))
+    while ((name = g_dir_read_name (dir)) != NULL)
+    {
+        g_autofree char *filename = NULL;
+
+        if (!g_str_has_suffix (name, "." G_MODULE_SUFFIX))
         {
-            if (g_str_has_suffix (name, "." G_MODULE_SUFFIX))
-            {
-                char *filename;
-
-                filename = g_build_filename (dirname,
-                                             name,
-                                             NULL);
-                nautilus_module_load_file (filename);
-                g_free (filename);
-            }
+            continue;
         }
 
-        g_dir_close (dir);
+        /* Loading two copies of the same extension would register its types
+         * twice, so the first directory providing a given file name wins. */
+        if (g_hash_table_contains (loaded_names, name))
+        {
+            g_debug ("Skipping extension %s/%s: already loaded from another directory",
+                     dirname, name);
+            continue;
+        }
+
+        g_hash_table_add (loaded_names, g_strdup (name));
+
+        filename = g_build_filename (dirname, name, NULL);
+        nautilus_module_load_file (filename);
     }
 }
 
@@ -242,7 +250,29 @@ nautilus_module_setup (void)
     {
         initialized = TRUE;
 
-        load_module_dir (NAUTILUS_EXTENSIONDIR);
+        g_autoptr (GHashTable) loaded_names = g_hash_table_new_full (g_str_hash,
+                                                                     g_str_equal,
+                                                                     g_free,
+                                                                     NULL);
+        const char *extension_path = g_getenv ("NAUTILUS_EXTENSION_PATH");
+
+        /* Additional directories, separated like PATH, are searched before the
+         * built-in one. This lets sandboxed builds (e.g. Flatpak extension
+         * points) provide extensions outside the installation prefix. */
+        if (extension_path != NULL)
+        {
+            g_auto (GStrv) dirs = g_strsplit (extension_path, G_SEARCHPATH_SEPARATOR_S, -1);
+
+            for (guint i = 0; dirs[i] != NULL; i++)
+            {
+                if (dirs[i][0] != '\0')
+                {
+                    load_module_dir (dirs[i], loaded_names);
+                }
+            }
+        }
+
+        load_module_dir (NAUTILUS_EXTENSIONDIR, loaded_names);
     }
 }
 
