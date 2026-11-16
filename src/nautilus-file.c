@@ -2358,6 +2358,32 @@ update_links_if_target (NautilusFile *target_file)
     nautilus_file_list_free (link_files);
 }
 
+/* Recent files only report whether their own name is hidden, so a file inside
+ * a hidden folder (e.g. ~/.cache/image.png) must be checked separately. */
+static gboolean
+uri_is_in_hidden_folder (const char *uri)
+{
+    g_autoptr (GFile) location = g_file_new_for_uri (uri);
+    g_autoptr (GFile) folder = g_file_get_parent (location);
+
+    while (folder != NULL)
+    {
+        g_autofree char *basename = g_file_get_basename (folder);
+        GFile *parent;
+
+        if (basename != NULL && basename[0] == '.')
+        {
+            return TRUE;
+        }
+
+        parent = g_file_get_parent (folder);
+        g_object_unref (folder);
+        folder = parent;
+    }
+
+    return FALSE;
+}
+
 static gboolean
 update_info_internal (NautilusFile *file,
                       GFileInfo    *info,
@@ -2462,6 +2488,12 @@ update_info_internal (NautilusFile *file,
                                                    G_FILE_ATTRIBUTE_STANDARD_IS_HIDDEN) ||
                 g_file_info_get_attribute_boolean (info,
                                                    G_FILE_ATTRIBUTE_STANDARD_IS_BACKUP);
+    if (!is_hidden &&
+        file->details->activation_uri != NULL &&
+        nautilus_file_is_in_recent (file))
+    {
+        is_hidden = uri_is_in_hidden_folder (file->details->activation_uri);
+    }
     if (file->details->is_hidden != is_hidden)
     {
         changed = TRUE;
