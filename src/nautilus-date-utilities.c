@@ -52,8 +52,18 @@ nautilus_date_setup_preferences (void)
                               NULL);
 }
 
-/* Keeps the local time zone. Time zone changes replace /etc/localtime, so
- * reload it when that changes. */
+/* Keeps the local time zone, and emits ::day-changed when the local date
+ * changes, so that displayed dates such as "Today" and "Yesterday" can be
+ * refreshed.
+ *
+ * Time zone changes replace /etc/localtime, so reload the time zone when that
+ * changes. There is no signal for the date changing, so check every few
+ * minutes, and at midnight. Checking periodically, rather than only at
+ * midnight, also catches resuming from suspend, during which timeouts don't
+ * advance, and changes to the system clock. A time zone change can also change
+ * the date, so check then too. */
+#define DATE_CHECK_INTERVAL_SECONDS (5 * 60)
+
 #define NAUTILUS_TYPE_CLOCK (nautilus_clock_get_type ())
 G_DECLARE_FINAL_TYPE (NautilusClock, nautilus_clock, NAUTILUS, CLOCK, GObject)
 
@@ -63,14 +73,79 @@ struct _NautilusClock
 
     GTimeZone *timezone;
     GFileMonitor *timezone_monitor;
+
+    GDateTime *last_date;
+    guint date_check_id;
 };
 
 G_DEFINE_FINAL_TYPE (NautilusClock, nautilus_clock, G_TYPE_OBJECT)
+
+enum
+{
+    DAY_CHANGED,
+    N_CLOCK_SIGNALS
+};
+
+static guint clock_signals[N_CLOCK_SIGNALS];
 
 static GTimeZone *
 nautilus_clock_get_timezone (NautilusClock *self)
 {
     return g_time_zone_ref (self->timezone);
+}
+
+static gboolean
+equal_date (GDateTime *datetime_a,
+            GDateTime *datetime_b);
+
+static void on_date_check_timeout (gpointer user_data);
+
+static void
+schedule_date_check (NautilusClock *self)
+{
+    g_autoptr (GTimeZone) timezone = nautilus_clock_get_timezone (self);
+    g_autoptr (GDateTime) now = g_date_time_new_now (timezone);
+    g_autoptr (GDateTime) tomorrow = g_date_time_add_days (now, 1);
+    g_autoptr (GDateTime) midnight = g_date_time_new (timezone,
+                                                      g_date_time_get_year (tomorrow),
+                                                      g_date_time_get_month (tomorrow),
+                                                      g_date_time_get_day_of_month (tomorrow),
+                                                      0, 0, 0);
+    gint64 seconds = DATE_CHECK_INTERVAL_SECONDS;
+
+    g_clear_handle_id (&self->date_check_id, g_source_remove);
+
+    if (midnight != NULL)
+    {
+        /* Add a second, as timeouts in seconds may fire slightly early. */
+        seconds = MIN (seconds, g_date_time_difference (midnight, now) / G_TIME_SPAN_SECOND + 1);
+    }
+
+    self->date_check_id = g_timeout_add_seconds_once (seconds, on_date_check_timeout, self);
+}
+
+static void
+check_date (NautilusClock *self)
+{
+    g_autoptr (GTimeZone) timezone = nautilus_clock_get_timezone (self);
+    g_autoptr (GDateTime) now = g_date_time_new_now (timezone);
+
+    if (!equal_date (now, self->last_date))
+    {
+        g_set_date_time (&self->last_date, now);
+        g_signal_emit (self, clock_signals[DAY_CHANGED], 0);
+    }
+
+    schedule_date_check (self);
+}
+
+static void
+on_date_check_timeout (gpointer user_data)
+{
+    NautilusClock *self = user_data;
+
+    self->date_check_id = 0;
+    check_date (self);
 }
 
 static void
@@ -83,6 +158,8 @@ on_timezone_file_changed (NautilusClock *self)
     {
         g_time_zone_unref (self->timezone);
         self->timezone = g_steal_pointer (&timezone);
+
+        check_date (self);
     }
 }
 
@@ -93,6 +170,8 @@ nautilus_clock_finalize (GObject *object)
 
     g_clear_object (&self->timezone_monitor);
     g_clear_pointer (&self->timezone, g_time_zone_unref);
+    g_clear_handle_id (&self->date_check_id, g_source_remove);
+    g_clear_pointer (&self->last_date, g_date_time_unref);
 
     G_OBJECT_CLASS (nautilus_clock_parent_class)->finalize (object);
 }
@@ -103,6 +182,13 @@ nautilus_clock_class_init (NautilusClockClass *klass)
     GObjectClass *object_class = G_OBJECT_CLASS (klass);
 
     object_class->finalize = nautilus_clock_finalize;
+
+    clock_signals[DAY_CHANGED] =
+        g_signal_new ("day-changed",
+                      G_TYPE_FROM_CLASS (klass),
+                      G_SIGNAL_RUN_LAST,
+                      0, NULL, NULL, NULL,
+                      G_TYPE_NONE, 0);
 }
 
 static void
@@ -119,6 +205,11 @@ nautilus_clock_init (NautilusClock *self)
                                  G_CALLBACK (on_timezone_file_changed), self,
                                  G_CONNECT_SWAPPED);
     }
+
+    g_autoptr (GTimeZone) timezone = nautilus_clock_get_timezone (self);
+
+    self->last_date = g_date_time_new_now (timezone);
+    schedule_date_check (self);
 }
 
 static NautilusClock *
@@ -132,6 +223,18 @@ get_clock (void)
     }
 
     return instance;
+}
+
+/**
+ * nautilus_date_get_clock:
+ *
+ * Returns: (transfer none): an object that emits `::day-changed` whenever
+ *   the local date changes.
+ */
+GObject *
+nautilus_date_get_clock (void)
+{
+    return G_OBJECT (get_clock ());
 }
 
 /**
