@@ -9,6 +9,12 @@
 #include <config.h>
 #include "nautilus-global-preferences.h"
 
+#define G_SETTINGS_ENABLE_BACKEND
+#include <gio/gsettingsbackend.h>
+#include <libportal/portal.h>
+#include <libportal/settings.h>
+
+#include "nautilus-application.h"
 #include "nautilus-file-utilities.h"
 
 GSettings *nautilus_preferences;
@@ -70,6 +76,81 @@ mouse_forward_button_changed (gpointer callback_data)
     mouse_forward_button = new_forward_button;
 }
 
+static void
+on_portal_setting_changed (XdpSettings *portal_settings,
+                           const char  *namespace,
+                           const char  *key,
+                           GVariant    *value,
+                           gpointer     user_data)
+{
+    GSettings *settings = user_data;
+    g_autoptr (GSettingsSchema) schema = NULL;
+    g_autoptr (GSettingsSchemaKey) schema_key = NULL;
+
+    g_object_get (settings, "settings-schema", &schema, NULL);
+    if (!g_str_equal (namespace, g_settings_schema_get_id (schema)) ||
+        !g_settings_schema_has_key (schema, key))
+    {
+        return;
+    }
+
+    schema_key = g_settings_schema_get_key (schema, key);
+    if (g_variant_is_of_type (value, g_settings_schema_key_get_value_type (schema_key)) &&
+        g_settings_schema_key_range_check (schema_key, value))
+    {
+        g_settings_set_value (settings, key, value);
+    }
+}
+
+/* In a sandbox, the desktop's settings are not readable directly, so keep
+ * an in-memory copy of them, filled and kept up to date by the Settings
+ * portal. Nautilus only reads these settings. */
+static GSettings *
+new_desktop_settings (const char *schema_id)
+{
+    static XdpSettings *portal_settings = NULL;
+    g_autoptr (GSettingsBackend) backend = NULL;
+    GSettings *settings;
+    const char *namespaces[] = { schema_id, NULL };
+    g_autoptr (GVariant) all_values = NULL;
+    g_autoptr (GVariant) values = NULL;
+    GVariantIter iter;
+    const char *key;
+    GVariant *value;
+
+    if (!nautilus_application_is_sandboxed ())
+    {
+        return g_settings_new (schema_id);
+    }
+
+    if (portal_settings == NULL)
+    {
+        g_autoptr (XdpPortal) portal = xdp_portal_new ();
+
+        portal_settings = xdp_portal_get_settings (portal);
+    }
+
+    backend = g_memory_settings_backend_new ();
+    settings = g_settings_new_with_backend (schema_id, backend);
+    g_signal_connect_object (portal_settings, "changed",
+                             G_CALLBACK (on_portal_setting_changed), settings, G_CONNECT_DEFAULT);
+
+    all_values = xdp_settings_read_all_values (portal_settings, namespaces, NULL, NULL);
+    values = all_values != NULL ? g_variant_lookup_value (all_values, schema_id,
+                                                          G_VARIANT_TYPE_VARDICT) : NULL;
+    if (values != NULL)
+    {
+        g_variant_iter_init (&iter, values);
+        while (g_variant_iter_next (&iter, "{&sv}", &key, &value))
+        {
+            on_portal_setting_changed (portal_settings, schema_id, key, value, settings);
+            g_variant_unref (value);
+        }
+    }
+
+    return settings;
+}
+
 void
 nautilus_global_preferences_init (void)
 {
@@ -91,8 +172,8 @@ nautilus_global_preferences_init (void)
     gtk_filechooser_preferences = g_settings_new_with_path ("org.gtk.gtk4.Settings.FileChooser",
                                                             "/org/gtk/gtk4/settings/file-chooser/");
     gnome_lockdown_preferences = g_settings_new ("org.gnome.desktop.lockdown");
-    gnome_interface_preferences = g_settings_new ("org.gnome.desktop.interface");
-    gnome_privacy_preferences = g_settings_new ("org.gnome.desktop.privacy");
+    gnome_interface_preferences = new_desktop_settings ("org.gnome.desktop.interface");
+    gnome_privacy_preferences = new_desktop_settings ("org.gnome.desktop.privacy");
     localsearch_preferences = g_settings_new ("org.freedesktop.Tracker3.Miner.Files");
 
     if (check_schema_available (FILE_SHARING_SCHEMA_ID) &&
