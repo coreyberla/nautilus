@@ -1620,10 +1620,22 @@ trash_file (CommonJob     *job,
     const char *details = NULL;
     int response;
     g_autofree gchar *basename = NULL;
+    g_autoptr (GFileInfo) undo_file_info = NULL;
 
     if (should_skip_file (job, file))
     {
         return FALSE;
+    }
+
+    if (job->undo_info != NULL)
+    {
+        /* Lets undo find the file in the trash */
+        undo_file_info = g_file_query_info (file,
+                                            G_FILE_ATTRIBUTE_UNIX_DEVICE ","
+                                            G_FILE_ATTRIBUTE_UNIX_INODE,
+                                            G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS,
+                                            job->cancellable,
+                                            NULL);
     }
 
     if (g_file_trash (file, job->cancellable, &error))
@@ -1633,7 +1645,8 @@ trash_file (CommonJob     *job,
 
         if (job->undo_info != NULL)
         {
-            nautilus_file_undo_info_trash_add_file (NAUTILUS_FILE_UNDO_INFO_TRASH (job->undo_info), file);
+            nautilus_file_undo_info_trash_add_file (NAUTILUS_FILE_UNDO_INFO_TRASH (job->undo_info),
+                                                    file, undo_file_info);
         }
 
         report_trash_progress (job, source_info, transfer_info);

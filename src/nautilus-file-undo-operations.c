@@ -21,14 +21,6 @@
 #include "nautilus-ui-utilities.h"
 
 
-/* Since we use g_get_current_time for setting "orig_trash_time" in the undo
- * info, there are situations where the difference between this value and the
- * real deletion time can differ enough to make the rounding a difference of 1
- * second, failing the equality check. To make sure we avoid this, and to be
- * preventive, use 2 seconds epsilon.
- */
-#define TRASH_TIME_EPSILON 2
-
 typedef struct
 {
     NautilusFileUndoOp op_type;
@@ -1575,8 +1567,18 @@ struct _NautilusFileUndoInfoTrash
 {
     NautilusFileUndoInfo parent_instance;
 
+    /* GFile → TrashedFile */
     GHashTable *trashed;
 };
+
+typedef struct
+{
+    /* Trashing is a rename, so these still identify the file in the trash,
+     * unlike its original path, which portals record with symlinks resolved.
+     * The inode is 0 if unknown. */
+    guint32 device;
+    guint64 inode;
+} TrashedFile;
 
 G_DEFINE_FINAL_TYPE (NautilusFileUndoInfoTrash, nautilus_file_undo_info_trash, NAUTILUS_TYPE_FILE_UNDO_INFO)
 
@@ -1616,45 +1618,6 @@ trash_strings_func (NautilusFileUndoInfo  *info,
 }
 
 static void
-trash_redo_func_callback (GHashTable *debuting_uris,
-                          gboolean    user_cancel,
-                          gpointer    user_data)
-{
-    NautilusFileUndoInfoTrash *self = user_data;
-    GHashTable *new_trashed_files;
-    gint64 updated_trash_time;
-    GFile *file;
-    GList *keys, *l;
-
-    if (!user_cancel)
-    {
-        new_trashed_files =
-            g_hash_table_new_full (g_file_hash, (GEqualFunc) g_file_equal,
-                                   g_object_unref, g_free);
-
-        keys = g_hash_table_get_keys (self->trashed);
-
-        /* Convert from microseconds to seconds */
-        updated_trash_time = g_get_real_time () / 1000000;
-
-        for (l = keys; l != NULL; l = l->next)
-        {
-            file = l->data;
-            g_hash_table_insert (new_trashed_files,
-                                 g_object_ref (file),
-                                 g_memdup2 (&updated_trash_time, sizeof (updated_trash_time)));
-        }
-
-        g_list_free (keys);
-        g_hash_table_destroy (self->trashed);
-
-        self->trashed = new_trashed_files;
-    }
-
-    file_undo_info_delete_callback (debuting_uris, user_cancel, user_data);
-}
-
-static void
 trash_redo_func (NautilusFileUndoInfo           *info,
                  GtkWindow                      *parent_window,
                  NautilusFileOperationsDBusData *dbus_data)
@@ -1668,7 +1631,7 @@ trash_redo_func (NautilusFileUndoInfo           *info,
         locations = g_hash_table_get_keys (self->trashed);
         nautilus_file_operations_trash_or_delete_async (locations, parent_window,
                                                         dbus_data,
-                                                        trash_redo_func_callback, self);
+                                                        file_undo_info_delete_callback, self);
 
         g_list_free (locations);
     }
@@ -1690,17 +1653,20 @@ trash_retrieve_files_to_restore_thread (GTask        *task,
 
     enumerator = g_file_enumerate_children (trash,
                                             G_FILE_ATTRIBUTE_STANDARD_NAME ","
-                                            G_FILE_ATTRIBUTE_TRASH_DELETION_DATE ","
-                                            G_FILE_ATTRIBUTE_TRASH_ORIG_PATH,
+                                            G_FILE_ATTRIBUTE_TRASH_ORIG_PATH ","
+                                            G_FILE_ATTRIBUTE_UNIX_DEVICE ","
+                                            G_FILE_ATTRIBUTE_UNIX_INODE,
                                             G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS,
                                             NULL, &error);
 
     if (enumerator)
     {
         GFileInfo *info;
-        gpointer lookupvalue;
-        gint64 orig_trash_time;
-        gint64 trash_time;
+        TrashedFile *trashed_file;
+        guint64 inode;
+        guint32 device;
+        GHashTableIter iter;
+        gpointer key, value;
         const char *origpath;
         GFile *origfile;
 
@@ -1711,32 +1677,34 @@ trash_retrieve_files_to_restore_thread (GTask        *task,
             origpath = g_file_info_get_attribute_byte_string (info, G_FILE_ATTRIBUTE_TRASH_ORIG_PATH);
             origfile = g_file_new_for_path (origpath);
 
-            lookupvalue = g_hash_table_lookup (self->trashed, origfile);
-
-            if (lookupvalue)
+            trashed_file = NULL;
+            inode = g_file_info_get_attribute_uint64 (info, G_FILE_ATTRIBUTE_UNIX_INODE);
+            device = g_file_info_get_attribute_uint32 (info, G_FILE_ATTRIBUTE_UNIX_DEVICE);
+            g_hash_table_iter_init (&iter, self->trashed);
+            while (inode != 0 && g_hash_table_iter_next (&iter, &key, &value))
             {
-                GDateTime *date;
+                g_autofree char *basename = g_file_get_basename (key);
+                g_autofree char *orig_basename = g_file_get_basename (origfile);
 
-                orig_trash_time = *((guint64 *) lookupvalue);
-                trash_time = 0;
-                date = g_file_info_get_deletion_date (info);
-                if (date)
+                /* The name guards against a reused inode number */
+                if (((TrashedFile *) value)->inode == inode &&
+                    ((TrashedFile *) value)->device == device &&
+                    g_str_equal (basename, orig_basename))
                 {
-                    trash_time = g_date_time_to_unix (date);
-                    g_date_time_unref (date);
+                    trashed_file = value;
+                    break;
                 }
+            }
 
-                if (ABS (orig_trash_time - trash_time) <= TRASH_TIME_EPSILON)
+            if (trashed_file != NULL)
+            {
+                g_autoptr (GFile) item = g_file_get_child (trash, g_file_info_get_name (info));
+
+                if (g_file_move (item, origfile,
+                                 G_FILE_COPY_NOFOLLOW_SYMLINKS,
+                                 NULL, NULL, NULL, NULL))
                 {
-                    /* File in the trash */
-                    g_autoptr (GFile) item = g_file_get_child (trash, g_file_info_get_name (info));
-
-                    if (g_file_move (item, origfile,
-                                     G_FILE_COPY_NOFOLLOW_SYMLINKS,
-                                     NULL, NULL, NULL, NULL))
-                    {
-                        n_restored++;
-                    }
+                    n_restored++;
                 }
             }
 
@@ -1868,13 +1836,17 @@ nautilus_file_undo_info_trash_new (gint item_count)
 
 void
 nautilus_file_undo_info_trash_add_file (NautilusFileUndoInfoTrash *self,
-                                        GFile                     *file)
+                                        GFile                     *file,
+                                        GFileInfo                 *info)
 {
-    /* Convert from microseconds to seconds */
-    gint64 orig_trash_time = g_get_real_time () / 1000000;
-    g_hash_table_insert (self->trashed,
-                         g_object_ref (file),
-                         g_memdup2 (&orig_trash_time, sizeof (orig_trash_time)));
+    TrashedFile *trashed_file = g_new0 (TrashedFile, 1);
+
+    if (info != NULL)
+    {
+        trashed_file->device = g_file_info_get_attribute_uint32 (info, G_FILE_ATTRIBUTE_UNIX_DEVICE);
+        trashed_file->inode = g_file_info_get_attribute_uint64 (info, G_FILE_ATTRIBUTE_UNIX_INODE);
+    }
+    g_hash_table_insert (self->trashed, g_object_ref (file), trashed_file);
 }
 
 GList *

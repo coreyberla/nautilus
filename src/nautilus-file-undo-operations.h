@@ -154,7 +154,8 @@ G_DECLARE_FINAL_TYPE (NautilusFileUndoInfoTrash, nautilus_file_undo_info_trash,
 
 NautilusFileUndoInfo *nautilus_file_undo_info_trash_new (gint item_count);
 void nautilus_file_undo_info_trash_add_file (NautilusFileUndoInfoTrash *self,
-                                             GFile                     *file);
+                                             GFile                     *file,
+                                             GFileInfo                 *info);
 GList *nautilus_file_undo_info_trash_get_files (NautilusFileUndoInfoTrash *self);
 
 /* recursive permissions */
