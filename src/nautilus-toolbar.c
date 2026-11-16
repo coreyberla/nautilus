@@ -30,9 +30,7 @@ struct _NautilusToolbar
     GtkWidget *toolbar_switcher;
     GtkWidget *path_bar;
     GtkWidget *location_entry;
-    GtkWidget *search_button_stack;
     GtkWidget *search_button;
-    GtkWidget *search_button_placeholder;
 
     gboolean show_location_entry;
     GtkWidget *focus_before_location_entry;
@@ -94,8 +92,7 @@ toolbar_update_appearance (NautilusToolbar *self)
     /* Adjust to global search mode. */
     gboolean search_global = (self->window_slot != NULL &&
                               nautilus_window_slot_get_search_global (self->window_slot));
-    gtk_stack_set_visible_child (GTK_STACK (self->search_button_stack),
-                                 search_global ? self->search_button_placeholder : self->search_button);
+    gtk_widget_set_visible (self->search_button, !search_global);
     gtk_stack_set_visible_child (GTK_STACK (self->history_controls_stack),
                                  search_global ? self->history_controls_placeholder : self->history_controls);
 }
@@ -534,9 +531,7 @@ nautilus_toolbar_class_init (NautilusToolbarClass *klass)
     gtk_widget_class_bind_template_child (widget_class, NautilusToolbar, search_container);
     gtk_widget_class_bind_template_child (widget_class, NautilusToolbar, path_bar);
     gtk_widget_class_bind_template_child (widget_class, NautilusToolbar, location_entry);
-    gtk_widget_class_bind_template_child (widget_class, NautilusToolbar, search_button_stack);
     gtk_widget_class_bind_template_child (widget_class, NautilusToolbar, search_button);
-    gtk_widget_class_bind_template_child (widget_class, NautilusToolbar, search_button_placeholder);
     gtk_widget_class_bind_template_child_full (widget_class, "show_sidebar_button", FALSE,
                                                G_STRUCT_OFFSET (NautilusToolbar, sidebar_button));
 
