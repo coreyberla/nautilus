@@ -9,6 +9,7 @@
 /* Needed for NautilusColumn (full GType). */
 #include <nautilus-extension.h>
 
+#include "nautilus-date-utilities.h"
 #include "nautilus-file.h"
 #include "nautilus-global-preferences.h"
 #include "nautilus-view-item.h"
@@ -51,6 +52,18 @@ update_label (NautilusLabelCell *self)
 
     string = nautilus_file_get_string_attribute_q (file, self->attribute_q);
     gtk_label_set_text (self->label, string);
+}
+
+static void
+on_day_changed (NautilusLabelCell *self)
+{
+    g_autoptr (NautilusViewItem) item = nautilus_view_cell_get_item (NAUTILUS_VIEW_CELL (self));
+
+    /* Unbound cells are refreshed when they get bound again. */
+    if (item != NULL)
+    {
+        update_label (self);
+    }
 }
 
 static void
@@ -119,6 +132,9 @@ nautilus_label_cell_constructed (GObject *object)
     {
         g_signal_connect_object (nautilus_preferences, "changed::" NAUTILUS_PREFERENCES_DATE_TIME_FORMAT,
                                  G_CALLBACK (update_label), self,
+                                 G_CONNECT_SWAPPED);
+        g_signal_connect_object (nautilus_date_get_clock (), "day-changed",
+                                 G_CALLBACK (on_day_changed), self,
                                  G_CONNECT_SWAPPED);
     }
 
