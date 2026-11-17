@@ -490,8 +490,12 @@ prepare_dialog (NautilusMountOperation *self,
         }
     }
 
-    /* Same default as GtkMountOperation. */
-    adw_switch_row_set_active (ADW_SWITCH_ROW (self->anonymous_row), TRUE);
+    /* GtkMountOperation always starts out anonymous. When the backend
+     * already suggests a username, signing in as that user is far more
+     * likely to be what is wanted, and it lets focus land straight on the
+     * password. */
+    adw_switch_row_set_active (ADW_SWITCH_ROW (self->anonymous_row),
+                               row_is_empty (self->username_row));
 
     update_connect_sensitivity (self);
 }
