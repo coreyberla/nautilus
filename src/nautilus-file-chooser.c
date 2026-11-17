@@ -458,8 +458,67 @@ on_filename_entry_changed (NautilusFileChooser *self)
                                       self->suggested_name != NULL);
 
     gtk_widget_set_visible (self->filename_undo_button, is_not_suggested_text);
+}
 
-    nautilus_filename_validator_validate (self->validator);
+/* Returns the extension of the filter's only glob pattern, if it has the form
+ * "*.ext". MIME type rules are ignored, and filters with several patterns are
+ * ambiguous, so they get no extension. */
+static char *
+get_filter_extension (GtkFileFilter *filter)
+{
+    if (filter == NULL)
+    {
+        return NULL;
+    }
+
+    g_autoptr (GVariant) variant = g_variant_ref_sink (gtk_file_filter_to_gvariant (filter));
+    g_autoptr (GVariantIter) rules = NULL;
+    const char *single_pattern = NULL;
+    guint32 rule_type;
+    const char *rule;
+
+    g_variant_get (variant, "(&sa(us))", NULL, &rules);
+
+    while (g_variant_iter_next (rules, "(u&s)", &rule_type, &rule))
+    {
+        /* Type 0 is a glob pattern, type 1 a MIME type. */
+        if (rule_type != 0)
+        {
+            continue;
+        }
+
+        if (single_pattern != NULL)
+        {
+            return NULL;
+        }
+
+        single_pattern = rule;
+    }
+
+    if (single_pattern == NULL)
+    {
+        return NULL;
+    }
+
+    return nautilus_filename_get_extension_from_glob (single_pattern);
+}
+
+/* The name that will be saved: the entered name, plus the extension of the
+ * selected filter if the entered name has no extension of its own. Only the
+ * validator uses this, which matters only in NAUTILUS_MODE_SAVE_FILE. */
+static char *
+get_name_to_save (NautilusFileChooser *self,
+                  const char          *entered_name,
+                  GtkFileFilter       *filter)
+{
+    if (entered_name == NULL)
+    {
+        return NULL;
+    }
+
+    g_autofree char *extension = get_filter_extension (filter);
+
+    return nautilus_filename_with_default_extension (entered_name, extension);
 }
 
 static void
@@ -935,6 +994,7 @@ nautilus_file_chooser_class_init (NautilusFileChooserClass *klass)
     gtk_widget_class_bind_template_callback (widget_class, on_validator_will_overwrite_changed);
     gtk_widget_class_bind_template_callback (widget_class, on_file_drop);
     gtk_widget_class_bind_template_callback (widget_class, get_filter_width_chars);
+    gtk_widget_class_bind_template_callback (widget_class, get_name_to_save);
 
     gtk_widget_class_add_binding_action (widget_class, GDK_KEY_e, GDK_CONTROL_MASK,
                                          "chooser.focus-entry", NULL);

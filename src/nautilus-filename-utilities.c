@@ -381,6 +381,109 @@ nautilus_filename_get_extension_char_offset (const char *filename)
 }
 
 /**
+ * nautilus_filename_get_extension_from_glob:
+ * @pattern: a glob pattern, as used by file filters.
+ *
+ * Extracts the extension that @pattern matches, if @pattern is of the form
+ * `*.ext`. Case-insensitive ranges like `[xX]`, which GTK generates for
+ * gtk_file_filter_add_suffix(), are resolved to the lowercase letter.
+ *
+ * Returns: (transfer full) (nullable): The extension including its leading
+ *          dot, or %NULL if @pattern does not match exactly one extension.
+ */
+char *
+nautilus_filename_get_extension_from_glob (const char *pattern)
+{
+    g_return_val_if_fail (pattern != NULL, NULL);
+
+    if (!g_str_has_prefix (pattern, "*."))
+    {
+        return NULL;
+    }
+
+    g_autoptr (GString) extension = g_string_new (".");
+
+    for (const char *p = pattern + strlen ("*."); *p != '\0'; p = g_utf8_next_char (p))
+    {
+        gunichar c = g_utf8_get_char (p);
+
+        if (c == '[')
+        {
+            /* Only accept a range holding both cases of one letter, e.g. [xX] */
+            const char *first = g_utf8_next_char (p);
+            const char *second = (*first != '\0') ? g_utf8_next_char (first) : first;
+            const char *closing = (*second != '\0') ? g_utf8_next_char (second) : second;
+
+            if (*first == '\0' || *second == '\0' || *closing != ']')
+            {
+                return NULL;
+            }
+
+            gunichar a = g_utf8_get_char (first);
+            gunichar b = g_utf8_get_char (second);
+
+            if (!g_unichar_isalpha (a) || g_unichar_tolower (a) != g_unichar_tolower (b))
+            {
+                return NULL;
+            }
+
+            g_string_append_unichar (extension, g_unichar_tolower (a));
+            p = closing;
+        }
+        else if (c == '*' || c == '?' || c == ']' || c == '\\' || c == '/' ||
+                 (c == '.' && extension->str[extension->len - 1] == '.') ||
+                 g_unichar_isspace (c) || !g_unichar_isprint (c))
+        {
+            return NULL;
+        }
+        else
+        {
+            g_string_append_unichar (extension, c);
+        }
+    }
+
+    if (extension->str[extension->len - 1] == '.')
+    {
+        return NULL;
+    }
+
+    return g_string_free (g_steal_pointer (&extension), FALSE);
+}
+
+/**
+ * nautilus_filename_with_default_extension:
+ * @filename: a file name, possibly with surrounding whitespace.
+ * @extension: (nullable): an extension including its leading dot.
+ *
+ * Returns: (transfer full): A copy of @filename with surrounding whitespace
+ *          removed and @extension appended if @filename has no extension of
+ *          its own. Empty names, names ending with a dot and names that
+ *          already have an extension are returned unchanged.
+ */
+char *
+nautilus_filename_with_default_extension (const char *filename,
+                                          const char *extension)
+{
+    g_return_val_if_fail (filename != NULL, NULL);
+
+    char *name = nautilus_filename_strip (g_strdup (filename));
+
+    if (extension == NULL ||
+        name[0] == '\0' ||
+        g_str_has_suffix (name, ".") ||
+        *nautilus_filename_get_extension (name) != '\0')
+    {
+        return name;
+    }
+
+    char *name_with_extension = g_strconcat (name, extension, NULL);
+
+    g_free (name);
+
+    return name_with_extension;
+}
+
+/**
  * nautilus_filename_shorten_base:
  * @filename: (inout): Pointer to a filename that is to be shortened
  * @base: a base from which @filename was constructed

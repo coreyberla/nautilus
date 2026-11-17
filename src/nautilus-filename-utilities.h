@@ -35,6 +35,13 @@ nautilus_filename_get_extension (const char *filename);
 int
 nautilus_filename_get_extension_char_offset (const char *filename);
 
+char *
+nautilus_filename_get_extension_from_glob (const char *pattern);
+
+char *
+nautilus_filename_with_default_extension (const char *filename,
+                                          const char *extension);
+
 gboolean
 nautilus_filename_shorten_base (char       **filename,
                                 const char  *base,
