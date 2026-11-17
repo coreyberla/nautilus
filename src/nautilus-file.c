@@ -1974,6 +1974,7 @@ rename_file_chain (gpointer data,
 static void
 real_batch_rename (GList                         *files,
                    GList                         *new_names,
+                   GList                        **out_final_locations,
                    NautilusFileOperationCallback  callback,
                    gpointer                       callback_data)
 {
@@ -1998,6 +1999,17 @@ real_batch_rename (GList                         *files,
     GThreadPool *thread_pool = NULL;
     g_autoptr (GAsyncQueue) rollback_files = g_async_queue_new ();
     g_autoptr (GError) skip_error = NULL;
+    g_autolist (GFile) original_locations = NULL;
+
+    if (out_final_locations != NULL)
+    {
+        for (l1 = files; l1 != NULL; l1 = l1->next)
+        {
+            original_locations = g_list_prepend (original_locations,
+                                                 nautilus_file_get_location (NAUTILUS_FILE (l1->data)));
+        }
+        original_locations = g_list_reverse (original_locations);
+    }
 
     /* Set up a batch renaming operation.
      * FIXME: Use a variant that doesn't take a single file, or move to
@@ -2179,6 +2191,28 @@ real_batch_rename (GList                         *files,
         }
     }
 
+    if (out_final_locations != NULL)
+    {
+        g_autoptr (GHashTable) renamed = g_hash_table_new (g_file_hash, (GEqualFunc) g_file_equal);
+        GList *final_locations = NULL;
+
+        for (l1 = old_files, l2 = new_files; l1 != NULL && l2 != NULL; l1 = l1->next, l2 = l2->next)
+        {
+            g_hash_table_insert (renamed, l1->data, l2->data);
+        }
+
+        for (l1 = original_locations; l1 != NULL; l1 = l1->next)
+        {
+            GFile *new_location = g_hash_table_lookup (renamed, l1->data);
+
+            final_locations = g_list_prepend (final_locations,
+                                              g_object_ref (new_location != NULL ?
+                                                            new_location : l1->data));
+        }
+
+        *out_final_locations = g_list_reverse (final_locations);
+    }
+
     /* Tell the undo manager a batch rename is taking place if at least
      * a file has been renamed*/
     if (!nautilus_file_undo_manager_is_operating () && op->skipped_files != len)
@@ -2203,14 +2237,27 @@ real_batch_rename (GList                         *files,
     nautilus_file_operation_complete (op, NULL, skip_error);
 }
 
+/**
+ * nautilus_file_batch_rename:
+ * @files: (element-type NautilusFile): files to rename
+ * @new_names: (element-type GString): new names, in the same order as @files
+ * @out_final_locations: (out) (optional) (element-type GFile) (transfer full):
+ *   return location for the locations of @files once the operation is done,
+ *   in the same order as @files. Files which were not renamed keep their
+ *   original location.
+ * @callback: (nullable): called when the operation is complete
+ * @callback_data: data for @callback
+ */
 void
 nautilus_file_batch_rename (GList                         *files,
                             GList                         *new_names,
+                            GList                        **out_final_locations,
                             NautilusFileOperationCallback  callback,
                             gpointer                       callback_data)
 {
     real_batch_rename (files,
                        new_names,
+                       out_final_locations,
                        callback,
                        callback_data);
 }

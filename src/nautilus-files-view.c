@@ -181,6 +181,10 @@ struct _NautilusFilesView
     GHashTable *awaiting_acknowledge;
     NautilusSelectionSource pending_selection_source;
 
+    /* Locations of batch renamed files, to be selected once they show up */
+    GList *pending_renamed_locations;
+    guint pending_renamed_timeout_id;
+
     /* whether we are in the active slot */
     gboolean active;
 
@@ -4029,6 +4033,86 @@ still_should_show_file (NautilusFilesView *view,
 }
 
 static void
+clear_pending_renamed_selection (NautilusFilesView *self)
+{
+    g_clear_list (&self->pending_renamed_locations, g_object_unref);
+    g_clear_handle_id (&self->pending_renamed_timeout_id, g_source_remove);
+}
+
+/* Selects the files at the batch renamed locations. Unless @force is TRUE,
+ * nothing is done until all of them are shown in the view.
+ */
+static void
+select_pending_renamed_locations (NautilusFilesView *self,
+                                  gboolean           force)
+{
+    g_autolist (NautilusFile) selection = NULL;
+
+    if (self->pending_renamed_locations == NULL)
+    {
+        return;
+    }
+
+    for (GList *l = self->pending_renamed_locations; l != NULL; l = l->next)
+    {
+        g_autoptr (NautilusFile) file = nautilus_file_get_existing (l->data);
+
+        if (file != NULL &&
+            !nautilus_file_is_gone (file) &&
+            nautilus_view_model_get_item_for_file (self->model, file) != NULL)
+        {
+            selection = g_list_prepend (selection, g_steal_pointer (&file));
+        }
+        else if (!force)
+        {
+            return;
+        }
+    }
+
+    clear_pending_renamed_selection (self);
+
+    if (selection != NULL)
+    {
+        selection = g_list_reverse (selection);
+        nautilus_files_view_call_set_selection (self, selection,
+                                                NAUTILUS_SELECTION_SOURCE_OP_DONE);
+    }
+}
+
+static gboolean
+on_pending_renamed_timeout (gpointer user_data)
+{
+    NautilusFilesView *self = NAUTILUS_FILES_VIEW (user_data);
+
+    self->pending_renamed_timeout_id = 0;
+    select_pending_renamed_locations (self, TRUE);
+
+    return G_SOURCE_REMOVE;
+}
+
+static void
+on_batch_rename_files_renamed (NautilusFilesView *self,
+                               GList             *final_locations)
+{
+    clear_pending_renamed_selection (self);
+
+    self->pending_renamed_locations = g_list_copy_deep (final_locations,
+                                                        (GCopyFunc) g_object_ref,
+                                                        NULL);
+
+    /* The renamed files show up in the view asynchronously, as removals and
+     * additions or as changes. Keep the renamed files selected once they all
+     * do, giving up on the ones which haven't appeared after a while. */
+    select_pending_renamed_locations (self, FALSE);
+    if (self->pending_renamed_locations != NULL)
+    {
+        self->pending_renamed_timeout_id = g_timeout_add (1000,
+                                                          on_pending_renamed_timeout,
+                                                          self);
+    }
+}
+
+static void
 files_view_end_file_changes (NautilusFilesView *self)
 {
     nautilus_view_model_sort (self->model);
@@ -4049,6 +4133,8 @@ files_view_end_file_changes (NautilusFilesView *self)
         nautilus_files_view_set_selection (self, selection, NAUTILUS_SELECTION_SOURCE_OP_DONE);
         g_hash_table_remove_all (self->pending_reveal);
     }
+
+    select_pending_renamed_locations (self, FALSE);
 }
 
 static int
@@ -6003,6 +6089,9 @@ real_action_rename (NautilusFilesView *view)
 
             dialog = nautilus_batch_rename_dialog_new (g_steal_pointer (&selection),
                                                        window);
+            g_signal_connect_object (dialog, "files-renamed",
+                                     G_CALLBACK (on_batch_rename_files_renamed),
+                                     view, G_CONNECT_SWAPPED);
 
             adw_dialog_present (ADW_DIALOG (dialog), GTK_WIDGET (window));
         }
@@ -8687,6 +8776,8 @@ nautilus_files_view_stop_loading (NautilusFilesView *self)
 
     g_list_free_full (self->pending_selection, g_object_unref);
     self->pending_selection = NULL;
+
+    clear_pending_renamed_selection (self);
 
     done_loading (self, FALSE);
 

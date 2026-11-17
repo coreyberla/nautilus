@@ -299,6 +299,7 @@ void                    nautilus_file_rename                            (Nautilu
 									 gpointer                        callback_data);
 void                    nautilus_file_batch_rename                      (GList                          *files,
                                                                          GList                          *new_names,
+                                                                         GList                         **out_final_locations,
                                                                          NautilusFileOperationCallback   callback,
                                                                          gpointer                        callback_data);
 void                    nautilus_file_cancel                            (NautilusFile                   *file,

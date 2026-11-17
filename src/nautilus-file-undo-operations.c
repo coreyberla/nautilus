@@ -1195,7 +1195,7 @@ batch_rename_redo_func (NautilusFileUndoInfo           *info,
 
     files = g_list_reverse (files);
 
-    nautilus_file_batch_rename (files, self->new_display_names, file_undo_info_operation_callback, self);
+    nautilus_file_batch_rename (files, self->new_display_names, NULL, file_undo_info_operation_callback, self);
 }
 
 static void
@@ -1220,7 +1220,7 @@ batch_rename_undo_func (NautilusFileUndoInfo           *info,
 
     files = g_list_reverse (files);
 
-    nautilus_file_batch_rename (files, self->old_display_names, file_undo_info_operation_callback, self);
+    nautilus_file_batch_rename (files, self->old_display_names, NULL, file_undo_info_operation_callback, self);
 }
 
 static void

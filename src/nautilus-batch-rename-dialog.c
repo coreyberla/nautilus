@@ -91,6 +91,14 @@ static void     cancel_conflict_check (NautilusBatchRenameDialog *self);
 
 G_DEFINE_FINAL_TYPE (NautilusBatchRenameDialog, nautilus_batch_rename_dialog, ADW_TYPE_DIALOG);
 
+enum
+{
+    FILES_RENAMED,
+    LAST_SIGNAL
+};
+
+static guint signals[LAST_SIGNAL];
+
 static void
 change_numbering_order (GSimpleAction *action,
                         GVariant      *value,
@@ -404,9 +412,13 @@ static void
 begin_batch_rename (NautilusBatchRenameDialog *dialog,
                     GList                     *new_names)
 {
-    nautilus_file_batch_rename (dialog->selection, new_names, NULL, NULL);
+    g_autolist (GFile) final_locations = NULL;
+
+    nautilus_file_batch_rename (dialog->selection, new_names, &final_locations, NULL, NULL);
 
     gtk_widget_set_cursor (GTK_WIDGET (dialog->window), NULL);
+
+    g_signal_emit (dialog, signals[FILES_RENAMED], 0, final_locations);
 }
 
 static void
@@ -1489,6 +1501,22 @@ nautilus_batch_rename_dialog_class_init (NautilusBatchRenameDialogClass *klass)
     oclass->finalize = nautilus_batch_rename_dialog_finalize;
 
     widget_class->grab_focus = nautilus_batch_rename_dialog_grab_focus;
+
+    /**
+     * NautilusBatchRenameDialog::files-renamed:
+     * @dialog: the dialog
+     * @final_locations: (element-type GFile) (transfer none): locations of the
+     *   files after the rename, including files which were not renamed.
+     *
+     * Emitted once the batch rename operation is done.
+     */
+    signals[FILES_RENAMED] = g_signal_new ("files-renamed",
+                                           G_TYPE_FROM_CLASS (klass),
+                                           G_SIGNAL_RUN_LAST,
+                                           0,
+                                           NULL, NULL,
+                                           g_cclosure_marshal_VOID__POINTER,
+                                           G_TYPE_NONE, 1, G_TYPE_POINTER);
 
     g_type_ensure (NAUTILUS_TYPE_BATCH_RENAME_ITEM);
 

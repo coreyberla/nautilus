@@ -171,9 +171,21 @@ batch_rename_test (const GStrv hierarchy,
         new_names = g_list_prepend (new_names, new_name);
     }
 
-    nautilus_file_batch_rename (files, new_names, batch_rename_callback, &data);
+    g_autolist (GFile) final_locations = NULL;
+
+    nautilus_file_batch_rename (files, new_names, &final_locations, batch_rename_callback, &data);
 
     g_assert_true (success);
+
+    g_assert_cmpuint (g_list_length (final_locations), ==, len);
+    for (guint i = 0; i < len; i++)
+    {
+        g_autoptr (GFile) expected_location = g_file_new_build_filename (test_get_tmp_dir (),
+                                                                         expected_names[i],
+                                                                         NULL);
+
+        g_assert_true (g_file_equal (g_list_nth_data (final_locations, i), expected_location));
+    }
 
     /* Test undo by changing the expected names */
     data.expected_names = original_names;
