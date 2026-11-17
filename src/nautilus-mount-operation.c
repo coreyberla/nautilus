@@ -16,6 +16,18 @@
  * Saving passwords is unchanged: the dialog only collects the answers and
  * passes the chosen GPasswordSave to GVfs, which talks to the keyring.
  *
+ * Unlike GTK's dialog, this one stays open after Connect, showing a spinner
+ * until the mount is done:
+ *
+ * - If the backend asks again, the previous answer was rejected. The same
+ *   dialog switches back to asking, with an error, instead of a new dialog
+ *   popping up.
+ * - Nothing tells a mount operation that the mount finished, but whoever
+ *   runs the mount (GVfs, a volume monitor) holds a reference to it until
+ *   then, and every caller in Nautilus drops its own reference right after
+ *   starting the mount. So the dialog is closed when the operation is
+ *   disposed.
+ *
  * The dialog is declared in nautilus-mount-operation.blp, with every row a
  * backend can ask for; each request shows the ones it needs.
  */
@@ -36,7 +48,19 @@ struct _NautilusMountOperation
     GtkWidget *parent;
     GAskPasswordFlags flags;
 
+    /* Connect was pressed and the answers were sent; waiting to hear back. */
+    gboolean connecting;
+    /* The previous answer was anonymous, for the retry message. */
+    gboolean answered_anonymously;
+    /* A reference on ourselves, held while waiting for the user. */
+    gboolean holds_ref;
+    /* See on_close_attempt(). */
+    guint close_attempt_idle_id;
+
     /* Widgets of the dialog, owned by it. */
+    GtkWidget *content;
+    GtkWidget *error_revealer;
+    GtkWidget *error_label;
     GtkWidget *anonymous_group;
     GtkWidget *anonymous_row;
     GtkWidget *credentials_group;
@@ -48,6 +72,7 @@ struct _NautilusMountOperation
     GtkWidget *password_row;
     GtkWidget *remember_group;
     GtkWidget *remember_row;
+    GtkWidget *spinner_revealer;
 };
 
 G_DEFINE_FINAL_TYPE (NautilusMountOperation, nautilus_mount_operation, GTK_TYPE_MOUNT_OPERATION)
@@ -158,12 +183,26 @@ update_connect_sensitivity (NautilusMountOperation *self)
 {
     gboolean anonymous;
 
-    if (self->dialog == NULL)
+    if (self->dialog == NULL || self->connecting)
     {
         return;
     }
 
     anonymous = is_anonymous (self);
+
+    if (anonymous)
+    {
+        GtkWidget *focus = adw_dialog_get_focus (self->dialog);
+
+        /* Don't leave focus on a row that is about to turn insensitive: it
+         * would never get its focus-out, and GTK complains about it. */
+        if (focus != NULL &&
+            (gtk_widget_is_ancestor (focus, self->credentials_group) ||
+             gtk_widget_is_ancestor (focus, self->remember_group)))
+        {
+            adw_dialog_set_focus (self->dialog, self->anonymous_row);
+        }
+    }
 
     gtk_widget_set_sensitive (self->credentials_group, !anonymous);
     gtk_widget_set_sensitive (self->remember_group, !anonymous);
@@ -186,6 +225,14 @@ on_anonymous_changed (GObject                *row,
                       NautilusMountOperation *self)
 {
     update_connect_sensitivity (self);
+}
+
+static void
+on_password_changed (GtkEditable            *row,
+                     NautilusMountOperation *self)
+{
+    gtk_widget_remove_css_class (GTK_WIDGET (row), "error");
+    gtk_accessible_reset_state (GTK_ACCESSIBLE (row), GTK_ACCESSIBLE_STATE_INVALID);
 }
 
 /* Pressing Enter moves on to the next text row, like the GTK dialog does,
@@ -240,6 +287,9 @@ on_row_focus_leave (GtkEventControllerFocus *controller)
 static void
 clear_widgets (NautilusMountOperation *self)
 {
+    self->content = NULL;
+    self->error_revealer = NULL;
+    self->error_label = NULL;
     self->anonymous_group = NULL;
     self->anonymous_row = NULL;
     self->credentials_group = NULL;
@@ -251,26 +301,61 @@ clear_widgets (NautilusMountOperation *self)
     self->password_row = NULL;
     self->remember_group = NULL;
     self->remember_row = NULL;
+    self->spinner_revealer = NULL;
 }
 
-/* Forget the dialog, which is closing or closed. Drops the reference held
- * while it was showing, so this may finalize the operation. Call it last. */
+/* Stop waiting for the user: the reference that kept us alive meanwhile
+ * goes away, so this may finalize the operation. Call it last. */
 static void
-clear_dialog (NautilusMountOperation *self)
+release_self (NautilusMountOperation *self)
 {
-    g_autoptr (AdwDialog) dialog = g_steal_pointer (&self->dialog);
+    if (self->holds_ref)
+    {
+        self->holds_ref = FALSE;
+        g_object_unref (self);
+    }
+}
 
+/* Close the dialog without replying. May finalize the operation. */
+static void
+close_dialog_full (NautilusMountOperation *self,
+                   gboolean                notify)
+{
+    g_autoptr (AdwDialog) dialog = NULL;
+
+    if (self->dialog == NULL)
+    {
+        return;
+    }
+
+    dialog = g_steal_pointer (&self->dialog);
+
+    g_clear_handle_id (&self->close_attempt_idle_id, g_source_remove);
     g_signal_handlers_disconnect_by_data (dialog, self);
     if (self->parent != NULL)
     {
         g_signal_handlers_disconnect_by_data (self->parent, self);
         g_clear_weak_pointer (&self->parent);
     }
+
+    self->connecting = FALSE;
     clear_widgets (self);
 
-    g_object_notify (G_OBJECT (self), "is-showing");
+    adw_dialog_set_can_close (dialog, TRUE);
+    adw_dialog_force_close (dialog);
 
-    g_object_unref (self);
+    if (notify)
+    {
+        g_object_notify (G_OBJECT (self), "is-showing");
+    }
+
+    release_self (self);
+}
+
+static void
+close_dialog (NautilusMountOperation *self)
+{
+    close_dialog_full (self, TRUE);
 }
 
 static void
@@ -279,9 +364,11 @@ apply_answers (NautilusMountOperation *self)
     GMountOperation *op = G_MOUNT_OPERATION (self);
     guint selected;
 
+    self->answered_anonymously = is_anonymous (self);
+
     if (self->flags & G_ASK_PASSWORD_ANONYMOUS_SUPPORTED)
     {
-        g_mount_operation_set_anonymous (op, is_anonymous (self));
+        g_mount_operation_set_anonymous (op, self->answered_anonymously);
     }
 
     if (row_is_shown (self->username_row))
@@ -328,24 +415,65 @@ apply_answers (NautilusMountOperation *self)
     }
 }
 
-/* AdwAlertDialog emits "response" however it is closed, using the close
- * response ("cancel") when it is dismissed without picking one. */
+static void
+show_connecting (NautilusMountOperation *self)
+{
+    AdwAlertDialog *dialog = ADW_ALERT_DIALOG (self->dialog);
+
+    self->connecting = TRUE;
+
+    /* Move focus away first: a focused text field that turns insensitive
+     * never gets its focus-out, and GTK complains about it. */
+    adw_dialog_set_focus (self->dialog, NULL);
+    gtk_widget_set_sensitive (self->content, FALSE);
+    gtk_revealer_set_reveal_child (GTK_REVEALER (self->error_revealer), FALSE);
+    gtk_revealer_set_reveal_child (GTK_REVEALER (self->spinner_revealer), TRUE);
+
+    adw_alert_dialog_set_response_label (dialog, "connect", _("Connecting…"));
+    adw_alert_dialog_set_response_enabled (dialog, "connect", FALSE);
+}
+
+static void
+on_connect (NautilusMountOperation *self)
+{
+    apply_answers (self);
+    show_connecting (self);
+
+    g_mount_operation_reply (G_MOUNT_OPERATION (self), G_MOUNT_OPERATION_HANDLED);
+
+    /* From here on, our lifetime is up to whoever runs the mount. */
+    release_self (self);
+}
+
+static void
+on_cancel (NautilusMountOperation *self)
+{
+    /* While connecting, the answers are already sent and cannot be taken
+     * back. Closing the dialog just leaves the mount to finish on its own,
+     * as it does with GTK's dialog. */
+    if (!self->connecting)
+    {
+        g_mount_operation_reply (G_MOUNT_OPERATION (self), G_MOUNT_OPERATION_ABORTED);
+    }
+
+    close_dialog (self);
+}
+
 static void
 on_dialog_response (AdwAlertDialog         *dialog,
                     const char             *response,
                     NautilusMountOperation *self)
 {
-    gboolean connect = g_strcmp0 (response, "connect") == 0;
+    g_clear_handle_id (&self->close_attempt_idle_id, g_source_remove);
 
-    if (connect)
+    if (g_strcmp0 (response, "connect") == 0)
     {
-        apply_answers (self);
+        on_connect (self);
     }
-
-    g_mount_operation_reply (G_MOUNT_OPERATION (self),
-                             connect ? G_MOUNT_OPERATION_HANDLED : G_MOUNT_OPERATION_ABORTED);
-
-    clear_dialog (self);
+    else
+    {
+        on_cancel (self);
+    }
 }
 
 /* Closing the window takes the dialog away with it, without a response,
@@ -356,13 +484,33 @@ static void
 on_parent_unrealize (GtkWidget              *parent,
                      NautilusMountOperation *self)
 {
-    g_autoptr (AdwDialog) dialog = g_object_ref (self->dialog);
+    on_cancel (self);
+}
 
-    g_mount_operation_reply (G_MOUNT_OPERATION (self), G_MOUNT_OPERATION_ABORTED);
+static gboolean
+on_close_attempt_idle (gpointer user_data)
+{
+    NautilusMountOperation *self = NAUTILUS_MOUNT_OPERATION (user_data);
 
-    /* Disconnects us, so closing does not reply again. */
-    clear_dialog (self);
-    adw_dialog_force_close (dialog);
+    self->close_attempt_idle_id = 0;
+    on_cancel (self);
+
+    return G_SOURCE_REMOVE;
+}
+
+/* The dialog refuses to close by itself (can-close is FALSE) so that it can
+ * stay open while connecting. AdwAlertDialog then emits close-attempt both
+ * for Escape and right before emitting "response" for a pressed button.
+ * Escape is the one not followed by a response, so treat a close attempt as
+ * Cancel unless a response comes in first. */
+static void
+on_close_attempt (AdwDialog              *dialog,
+                  NautilusMountOperation *self)
+{
+    if (self->close_attempt_idle_id == 0)
+    {
+        self->close_attempt_idle_id = g_idle_add (on_close_attempt_idle, self);
+    }
 }
 
 static void
@@ -375,8 +523,10 @@ create_dialog (NautilusMountOperation *self)
 
     scope = gtk_builder_cscope_new ();
     gtk_builder_cscope_add_callback (scope, on_dialog_response);
+    gtk_builder_cscope_add_callback (scope, on_close_attempt);
     gtk_builder_cscope_add_callback (scope, on_anonymous_changed);
     gtk_builder_cscope_add_callback (scope, on_input_changed);
+    gtk_builder_cscope_add_callback (scope, on_password_changed);
     gtk_builder_cscope_add_callback (scope, on_entry_activated);
 
     builder = gtk_builder_new ();
@@ -391,6 +541,9 @@ create_dialog (NautilusMountOperation *self)
     self->dialog = g_object_ref (ADW_DIALOG (gtk_builder_get_object (builder, "dialog")));
 
 #define GET_WIDGET(name) self->name = GTK_WIDGET (gtk_builder_get_object (builder, #name))
+    GET_WIDGET (content);
+    GET_WIDGET (error_revealer);
+    GET_WIDGET (error_label);
     GET_WIDGET (anonymous_group);
     GET_WIDGET (anonymous_row);
     GET_WIDGET (credentials_group);
@@ -402,6 +555,7 @@ create_dialog (NautilusMountOperation *self)
     GET_WIDGET (password_row);
     GET_WIDGET (remember_group);
     GET_WIDGET (remember_row);
+    GET_WIDGET (spinner_revealer);
 #undef GET_WIDGET
 
     entry_rows[0] = self->username_row;
@@ -418,7 +572,8 @@ create_dialog (NautilusMountOperation *self)
 }
 
 static GtkWidget *
-row_to_focus (NautilusMountOperation *self)
+row_to_focus (NautilusMountOperation *self,
+              gboolean                retry)
 {
     GtkWidget *order[] =
     {
@@ -428,6 +583,11 @@ row_to_focus (NautilusMountOperation *self)
     if (is_anonymous (self))
     {
         return NULL;
+    }
+
+    if (retry && row_is_shown (self->password_row))
+    {
+        return self->password_row;
     }
 
     for (guint i = 0; i < G_N_ELEMENTS (order); i++)
@@ -441,17 +601,19 @@ row_to_focus (NautilusMountOperation *self)
     return NULL;
 }
 
-/* Set the dialog up for a request. */
+/* Set the dialog up for a request. @retry means the backend asked again
+ * after the previous answer, i.e. it was not accepted; what was typed then
+ * is still in the rows. */
 static void
 prepare_dialog (NautilusMountOperation *self,
                 const char             *message,
                 const char             *default_user,
-                const char             *default_domain)
+                const char             *default_domain,
+                gboolean                retry)
 {
     GMountOperation *op = G_MOUNT_OPERATION (self);
     AdwAlertDialog *dialog = ADW_ALERT_DIALOG (self->dialog);
     GAskPasswordFlags flags = self->flags;
-    GPasswordSave password_save = g_mount_operation_get_password_save (op);
     const char *newline;
 
     /* Backends send "Primary text\nSecondary text". */
@@ -478,26 +640,105 @@ prepare_dialog (NautilusMountOperation *self,
     gtk_widget_set_visible (self->password_row, (flags & G_ASK_PASSWORD_NEED_PASSWORD) != 0);
     gtk_widget_set_visible (self->remember_group, (flags & G_ASK_PASSWORD_SAVING_SUPPORTED) != 0);
 
-    gtk_editable_set_text (GTK_EDITABLE (self->username_row), default_user != NULL ? default_user : "");
-    gtk_editable_set_text (GTK_EDITABLE (self->domain_row), default_domain != NULL ? default_domain : "");
-
-    for (guint i = 0; i < G_N_ELEMENTS (remember_choices); i++)
+    if (!retry)
     {
-        if (remember_choices[i] == password_save)
+        GPasswordSave password_save = g_mount_operation_get_password_save (op);
+
+        gtk_editable_set_text (GTK_EDITABLE (self->username_row), default_user != NULL ? default_user : "");
+        gtk_editable_set_text (GTK_EDITABLE (self->domain_row), default_domain != NULL ? default_domain : "");
+
+        for (guint i = 0; i < G_N_ELEMENTS (remember_choices); i++)
         {
-            adw_combo_row_set_selected (ADW_COMBO_ROW (self->remember_row), i);
-            break;
+            if (remember_choices[i] == password_save)
+            {
+                adw_combo_row_set_selected (ADW_COMBO_ROW (self->remember_row), i);
+                break;
+            }
         }
     }
 
     /* GtkMountOperation always starts out anonymous. When the backend
      * already suggests a username, signing in as that user is far more
      * likely to be what is wanted, and it lets focus land straight on the
-     * password. */
+     * password. After a rejected attempt, offer signing in. */
     adw_switch_row_set_active (ADW_SWITCH_ROW (self->anonymous_row),
-                               row_is_empty (self->username_row));
+                               !retry && row_is_empty (self->username_row));
+
+    gtk_editable_set_text (GTK_EDITABLE (self->password_row), "");
+
+    if (retry)
+    {
+        gtk_label_set_text (GTK_LABEL (self->error_label),
+                            self->answered_anonymously ?
+                            _("The server did not allow connecting anonymously.") :
+                            _("The server did not accept the username or password."));
+
+        if (!self->answered_anonymously)
+        {
+            gtk_widget_add_css_class (self->password_row, "error");
+            gtk_accessible_update_state (GTK_ACCESSIBLE (self->password_row),
+                                         GTK_ACCESSIBLE_STATE_INVALID, GTK_ACCESSIBLE_INVALID_TRUE,
+                                         -1);
+        }
+
+        /* The dialog does not change otherwise, so say what happened. */
+        gtk_accessible_announce (GTK_ACCESSIBLE (self->dialog),
+                                 gtk_label_get_text (GTK_LABEL (self->error_label)),
+                                 GTK_ACCESSIBLE_ANNOUNCEMENT_PRIORITY_MEDIUM);
+    }
+    gtk_revealer_set_reveal_child (GTK_REVEALER (self->error_revealer), retry);
+
+    /* Back from connecting, if we were. */
+    self->connecting = FALSE;
+    gtk_widget_set_sensitive (self->content, TRUE);
+    gtk_revealer_set_reveal_child (GTK_REVEALER (self->spinner_revealer), FALSE);
+    adw_alert_dialog_set_response_label (dialog, "connect", _("Co_nnect"));
 
     update_connect_sensitivity (self);
+}
+
+static void
+ask (NautilusMountOperation *self,
+     const char             *message,
+     const char             *default_user,
+     const char             *default_domain)
+{
+    gboolean retry = self->dialog != NULL;
+    GtkWidget *focus;
+
+    if (!retry)
+    {
+        create_dialog (self);
+    }
+
+    /* Keep the operation alive while waiting for the user, like GTK does. */
+    if (!self->holds_ref)
+    {
+        self->holds_ref = TRUE;
+        g_object_ref (self);
+    }
+
+    prepare_dialog (self, message, default_user, default_domain, retry);
+
+    if (!retry)
+    {
+        GtkWindow *parent = gtk_mount_operation_get_parent (GTK_MOUNT_OPERATION (self));
+
+        if (parent != NULL)
+        {
+            g_set_weak_pointer (&self->parent, GTK_WIDGET (parent));
+            g_signal_connect (parent, "unrealize", G_CALLBACK (on_parent_unrealize), self);
+        }
+
+        g_object_notify (G_OBJECT (self), "is-showing");
+        adw_dialog_present (self->dialog, self->parent);
+    }
+
+    focus = row_to_focus (self, retry);
+    if (focus != NULL)
+    {
+        gtk_widget_grab_focus (focus);
+    }
 }
 
 static void
@@ -508,8 +749,6 @@ nautilus_mount_operation_ask_password (GMountOperation   *op,
                                        GAskPasswordFlags  flags)
 {
     NautilusMountOperation *self = NAUTILUS_MOUNT_OPERATION (op);
-    GtkWindow *parent;
-    GtkWidget *focus;
 
     /* Leave password-only prompts to GTK so they keep going to the shell's
      * mount operation handler, as they do today. */
@@ -517,35 +756,21 @@ nautilus_mount_operation_ask_password (GMountOperation   *op,
     {
         GMountOperationClass *parent_class = G_MOUNT_OPERATION_CLASS (nautilus_mount_operation_parent_class);
 
+        /* Our dialog may still be showing its spinner. Keep ourselves alive
+         * past closing it, since GTK takes over from here. */
+        g_object_ref (self);
+        close_dialog (self);
         parent_class->ask_password (op, message, default_user, default_domain, flags);
+        g_object_unref (self);
         return;
     }
 
-    g_return_if_fail (self->dialog == NULL);
+    /* A second request while the first is still unanswered is a bug in the
+     * caller; the first one would never get its reply. */
+    g_return_if_fail (self->dialog == NULL || self->connecting);
 
     self->flags = flags;
-    create_dialog (self);
-    prepare_dialog (self, message, default_user, default_domain);
-
-    /* Keep the operation alive while the dialog is up, like GTK does. */
-    g_object_ref (self);
-
-    g_object_notify (G_OBJECT (self), "is-showing");
-
-    parent = gtk_mount_operation_get_parent (GTK_MOUNT_OPERATION (self));
-    if (parent != NULL)
-    {
-        g_set_weak_pointer (&self->parent, GTK_WIDGET (parent));
-        g_signal_connect (parent, "unrealize", G_CALLBACK (on_parent_unrealize), self);
-    }
-
-    adw_dialog_present (self->dialog, self->parent);
-
-    focus = row_to_focus (self);
-    if (focus != NULL)
-    {
-        gtk_widget_grab_focus (focus);
-    }
+    ask (self, message, default_user, default_domain);
 }
 
 static void
@@ -553,14 +778,7 @@ nautilus_mount_operation_aborted (GMountOperation *op)
 {
     NautilusMountOperation *self = NAUTILUS_MOUNT_OPERATION (op);
 
-    if (self->dialog != NULL)
-    {
-        g_autoptr (AdwDialog) dialog = g_object_ref (self->dialog);
-
-        /* Disconnects us, so closing does not reply. */
-        clear_dialog (self);
-        adw_dialog_force_close (dialog);
-    }
+    close_dialog (self);
 
     G_MOUNT_OPERATION_CLASS (nautilus_mount_operation_parent_class)->aborted (op);
 }
@@ -599,12 +817,28 @@ nautilus_mount_operation_get_property (GObject    *object,
 }
 
 static void
+nautilus_mount_operation_dispose (GObject *object)
+{
+    NautilusMountOperation *self = NAUTILUS_MOUNT_OPERATION (object);
+
+    /* The mount is over: whoever ran it has let go of us. Don't notify
+     * "is-showing" here: the mount has already been reported finished, and
+     * whatever a handler was watching for may be gone by now. Callers that
+     * paused their own progress while the dialog showed resume it from
+     * their mount callback instead. */
+    close_dialog_full (self, FALSE);
+
+    G_OBJECT_CLASS (nautilus_mount_operation_parent_class)->dispose (object);
+}
+
+static void
 nautilus_mount_operation_class_init (NautilusMountOperationClass *klass)
 {
     GObjectClass *object_class = G_OBJECT_CLASS (klass);
     GMountOperationClass *mount_op_class = G_MOUNT_OPERATION_CLASS (klass);
 
     object_class->get_property = nautilus_mount_operation_get_property;
+    object_class->dispose = nautilus_mount_operation_dispose;
 
     mount_op_class->ask_password = nautilus_mount_operation_ask_password;
     mount_op_class->aborted = nautilus_mount_operation_aborted;
@@ -626,6 +860,10 @@ nautilus_mount_operation_init (NautilusMountOperation *self)
  *
  * Creates a mount operation that asks for credentials with a libadwaita
  * dialog. Drop-in replacement for gtk_mount_operation_new().
+ *
+ * The credentials dialog stays open with a spinner after Connect until the
+ * operation is released, so callers must not keep a reference to it past
+ * the end of the mount.
  *
  * Returns: (transfer full): a new #GMountOperation
  */

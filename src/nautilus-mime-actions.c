@@ -61,6 +61,7 @@ typedef struct
     NautilusOpenFlags flags;
     char *timed_wait_prompt;
     gboolean timed_wait_active;
+    gboolean timed_wait_paused_for_mount_op;
     NautilusFileListHandle *files_handle;
     gboolean tried_mounting;
     char *activation_directory;
@@ -1054,12 +1055,25 @@ activate_mount_op_active (GtkMountOperation  *operation,
 
     g_object_get (operation, "is-showing", &is_active, NULL);
 
+    parameters->timed_wait_paused_for_mount_op = is_active;
     if (is_active)
     {
         pause_activation_timed_cancel (parameters);
     }
     else
     {
+        unpause_activation_timed_cancel (parameters);
+    }
+}
+
+/* The mount operation's dialog stays up until the mount is done, and does
+ * not report going away after that. So resume the wait here if it paused it. */
+static void
+activation_mount_op_done (ActivateParameters *parameters)
+{
+    if (parameters->timed_wait_paused_for_mount_op)
+    {
+        parameters->timed_wait_paused_for_mount_op = FALSE;
         unpause_activation_timed_cancel (parameters);
     }
 }
@@ -1785,6 +1799,8 @@ activation_mount_not_mounted_callback (GObject      *source_object,
     NautilusFile *file;
     LaunchLocation *loc;
 
+    activation_mount_op_done (parameters);
+
     file = parameters->not_mounted->data;
 
     error = NULL;
@@ -2051,6 +2067,8 @@ activation_mountable_mounted (NautilusFile *file,
     NautilusFile *target_file;
     LaunchLocation *location;
 
+    activation_mount_op_done (parameters);
+
     /* Remove from list of files that have to be mounted */
     parameters->mountables = g_list_remove (parameters->mountables, file);
     nautilus_file_unref (file);
@@ -2147,6 +2165,8 @@ activation_mountable_started (NautilusFile *file,
 {
     ActivateParameters *parameters = callback_data;
     LaunchLocation *location;
+
+    activation_mount_op_done (parameters);
 
     /* Remove from list of files that have to be mounted */
     parameters->start_mountables = g_list_remove (parameters->start_mountables, file);
