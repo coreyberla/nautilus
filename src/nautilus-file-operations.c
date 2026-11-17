@@ -39,6 +39,7 @@
 #include "nautilus-file-undo-operations.h"
 #include "nautilus-file-utilities.h"
 #include "nautilus-filename-utilities.h"
+#include "nautilus-mount-operation.h"
 #include "nautilus-operations-ui-manager.h"
 #include "nautilus-scheme.h"
 #include "nautilus-tag-manager.h"
@@ -2152,7 +2153,7 @@ do_unmount (UnmountData *data)
     }
     else
     {
-        mount_op = gtk_mount_operation_new (data->parent_window);
+        mount_op = nautilus_mount_operation_new (data->parent_window);
     }
 
     g_signal_connect (mount_op, "show-unmount-progress",
@@ -2441,7 +2442,7 @@ nautilus_file_operations_mount_volume_full (GtkWindow             *parent_window
 {
     GMountOperation *mount_op;
 
-    mount_op = gtk_mount_operation_new (parent_window);
+    mount_op = nautilus_mount_operation_new (parent_window);
     g_mount_operation_set_password_save (mount_op, G_PASSWORD_SAVE_FOR_SESSION);
     g_object_set_data (G_OBJECT (mount_op),
                        "mount-callback",

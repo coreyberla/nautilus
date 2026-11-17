@@ -26,6 +26,7 @@
     <file>ui/nautilus-grid-cell.ui</file>
     <file>ui/nautilus-grid-view-captions-dialog.ui</file>
     <file>ui/nautilus-history-controls.ui</file>
+    <file>ui/nautilus-mount-operation.ui</file>
     <file>ui/nautilus-name-cell.ui</file>
     <file>ui/nautilus-network-address-bar.ui</file>
     <file>ui/nautilus-network-cell.ui</file>

@@ -10,6 +10,7 @@
 #include <glib/gi18n.h>
 #include <adwaita.h>
 
+#include "nautilus-mount-operation.h"
 #include "nautilus-recent-servers.h"
 
 struct _NautilusNetworkAddressBar
@@ -156,7 +157,7 @@ mount_server (NautilusNetworkAddressBar *self,
               GFile                     *location)
 {
     GtkWidget *toplevel = GTK_WIDGET (gtk_widget_get_root (GTK_WIDGET (self)));
-    g_autoptr (GMountOperation) operation = gtk_mount_operation_new (GTK_WINDOW (toplevel));
+    g_autoptr (GMountOperation) operation = nautilus_mount_operation_new (GTK_WINDOW (toplevel));
 
     g_cancellable_cancel (self->cancellable);
     g_clear_object (&self->cancellable);

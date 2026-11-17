@@ -1,0 +1,92 @@
+using Gtk 4.0;
+using Adw 1;
+// Credentials prompt of NautilusMountOperation. Every row the backends can
+// ask for is declared here; the code shows the ones each request needs.
+Adw.AlertDialog dialog {
+  default-response: "connect";
+  close-response: "cancel";
+  response => $on_dialog_response();
+
+  extra-child: Box {
+    orientation: vertical;
+    spacing: 12;
+
+    Adw.PreferencesGroup anonymous_group {
+      visible: false;
+
+      Adw.SwitchRow anonymous_row {
+        title: _("Connect _Anonymously");
+        use-underline: true;
+        notify::active => $on_anonymous_changed();
+      }
+    }
+
+    Adw.PreferencesGroup credentials_group {
+      Adw.EntryRow username_row {
+        title: _("_Username");
+        use-underline: true;
+        visible: false;
+        changed => $on_input_changed();
+        entry-activated => $on_entry_activated();
+      }
+
+      Adw.EntryRow domain_row {
+        title: _("_Domain");
+        use-underline: true;
+        visible: false;
+        changed => $on_input_changed();
+        entry-activated => $on_entry_activated();
+      }
+
+      Adw.SwitchRow hidden_volume_row {
+        title: _("_Hidden Volume");
+        use-underline: true;
+        visible: false;
+      }
+
+      Adw.SwitchRow system_volume_row {
+        title: _("_Windows System Volume");
+        use-underline: true;
+        visible: false;
+      }
+
+      Adw.EntryRow pim_row {
+        title: _("_PIM");
+        use-underline: true;
+        input-purpose: digits;
+        visible: false;
+        changed => $on_input_changed();
+        entry-activated => $on_entry_activated();
+      }
+
+      Adw.PasswordEntryRow password_row {
+        title: _("_Password");
+        use-underline: true;
+        visible: false;
+        entry-activated => $on_entry_activated();
+      }
+    }
+
+    Adw.PreferencesGroup remember_group {
+      visible: false;
+      // Keep in sync with remember_choices in the code.
+      Adw.ComboRow remember_row {
+        title: _("_Remember Password");
+        use-underline: true;
+
+        model: StringList {
+          strings [
+            _("Forget Immediately"),
+            _("Until You Log Out"),
+            _("Forever"),
+          ]
+        };
+      }
+    }
+  };
+
+  responses [
+    cancel: _("_Cancel"),
+    connect: _("Co_nnect") suggested,
+  ]
+}

@@ -177,6 +177,8 @@ libnautilus_sources = [
   'nautilus-module.h',
   'nautilus-monitor.c',
   'nautilus-monitor.h',
+  'nautilus-mount-operation.c',
+  'nautilus-mount-operation.h',
   'nautilus-name-cell.c',
   'nautilus-name-cell.h',
   'nautilus-network-address-bar.c',

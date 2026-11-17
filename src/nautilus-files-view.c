@@ -46,6 +46,7 @@
 #include "nautilus-list-view.h"
 #include "nautilus-metadata.h"
 #include "nautilus-mime-actions.h"
+#include "nautilus-mount-operation.h"
 #include "nautilus-network-view.h"
 #include "nautilus-module.h"
 #include "nautilus-new-folder-dialog.h"
@@ -6654,7 +6655,7 @@ action_mount_volume (GSimpleAction *action,
             NautilusViewItem *item = nautilus_view_model_get_item_for_file (view->model, file);
 
             nautilus_view_item_set_loading (item, TRUE);
-            mount_op = gtk_mount_operation_new (nautilus_files_view_get_containing_window (view));
+            mount_op = nautilus_mount_operation_new (nautilus_files_view_get_containing_window (view));
             g_mount_operation_set_password_save (mount_op, G_PASSWORD_SAVE_FOR_SESSION);
             nautilus_file_mount (file, mount_op, NULL,
                                  file_mount_callback,
@@ -6685,7 +6686,7 @@ action_unmount_volume (GSimpleAction *action,
             NautilusViewItem *item = nautilus_view_model_get_item_for_file (view->model, file);
 
             nautilus_view_item_set_loading (item, TRUE);
-            mount_op = gtk_mount_operation_new (nautilus_files_view_get_containing_window (view));
+            mount_op = nautilus_mount_operation_new (nautilus_files_view_get_containing_window (view));
             nautilus_file_unmount (file, mount_op, NULL,
                                    file_unmount_callback, g_object_ref (view));
             g_object_unref (mount_op);
@@ -6713,7 +6714,7 @@ action_eject_volume (GSimpleAction *action,
         if (nautilus_file_can_eject (file))
         {
             GMountOperation *mount_op;
-            mount_op = gtk_mount_operation_new (nautilus_files_view_get_containing_window (view));
+            mount_op = nautilus_mount_operation_new (nautilus_files_view_get_containing_window (view));
             nautilus_file_eject (file, mount_op, NULL,
                                  file_eject_callback, g_object_ref (view));
             g_object_unref (mount_op);
@@ -6766,7 +6767,7 @@ action_start_volume (GSimpleAction *action,
 
         if (nautilus_file_can_start (file) || nautilus_file_can_start_degraded (file))
         {
-            mount_op = gtk_mount_operation_new (nautilus_files_view_get_containing_window (view));
+            mount_op = nautilus_mount_operation_new (nautilus_files_view_get_containing_window (view));
             nautilus_file_start (file, mount_op, NULL,
                                  file_start_callback, view);
             g_object_unref (mount_op);
@@ -6794,7 +6795,7 @@ action_stop_volume (GSimpleAction *action,
         if (nautilus_file_can_stop (file))
         {
             GMountOperation *mount_op;
-            mount_op = gtk_mount_operation_new (nautilus_files_view_get_containing_window (view));
+            mount_op = nautilus_mount_operation_new (nautilus_files_view_get_containing_window (view));
             nautilus_file_stop (file, mount_op, NULL,
                                 file_stop_callback, g_object_ref (view));
             g_object_unref (mount_op);
