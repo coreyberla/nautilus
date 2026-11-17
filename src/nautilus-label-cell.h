@@ -17,7 +17,10 @@ G_BEGIN_DECLS
 
 G_DECLARE_FINAL_TYPE (NautilusLabelCell, nautilus_label_cell, NAUTILUS, LABEL_CELL, NautilusViewCell)
 
-NautilusViewCell * nautilus_label_cell_new (NautilusListBase *view,
-                                            NautilusColumn   *column);
+NautilusViewCell * nautilus_label_cell_new (NautilusListBase    *view,
+                                            NautilusColumn      *column,
+                                            GtkColumnViewColumn *view_column);
+
+void nautilus_label_cell_reset_width_hint (GtkColumnViewColumn *view_column);
 
 G_END_DECLS

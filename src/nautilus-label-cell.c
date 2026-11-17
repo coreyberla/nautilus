@@ -20,6 +20,7 @@ struct _NautilusLabelCell
     GSignalGroup *item_signal_group;
 
     NautilusColumn *column;
+    GtkColumnViewColumn *view_column;
     GQuark attribute_q;
 
     GtkLabel *label;
@@ -33,10 +34,53 @@ enum
 {
     PROP_0,
     PROP_COLUMN,
+    PROP_VIEW_COLUMN,
     N_PROPS
 };
 
 static GParamSpec *properties[N_PROPS] = { NULL, };
+
+/* The widest natural width any cell of a given column has reported so far,
+ * stored on the GtkColumnViewColumn (which is per-view, unlike NautilusColumn).
+ *
+ * GtkColumnView sizes non-expanding columns according to the cells which are
+ * currently instantiated, so without this the column width would change while
+ * scrolling or moving the selection, as cells with labels of different widths
+ * come and go (e.g. "10:23" vs "3 May 2023"). By never reporting less than the
+ * widest label seen so far, columns only ever grow (until reset).
+ * See https://gitlab.gnome.org/GNOME/nautilus/-/issues/2973 */
+static GQuark width_hint_quark;
+
+static int
+get_width_hint (GtkColumnViewColumn *view_column)
+{
+    return GPOINTER_TO_INT (g_object_get_qdata (G_OBJECT (view_column), width_hint_quark));
+}
+
+static void
+set_width_hint (GtkColumnViewColumn *view_column,
+                int                  width)
+{
+    g_object_set_qdata (G_OBJECT (view_column), width_hint_quark, GINT_TO_POINTER (width));
+}
+
+/**
+ * nautilus_label_cell_reset_width_hint:
+ * @view_column: a column whose cells are #NautilusLabelCell
+ *
+ * Forgets the widest width seen for this column, allowing it to shrink. To be
+ * called when the contents of the view are replaced, e.g. on location change.
+ */
+void
+nautilus_label_cell_reset_width_hint (GtkColumnViewColumn *view_column)
+{
+    g_return_if_fail (GTK_IS_COLUMN_VIEW_COLUMN (view_column));
+
+    if (width_hint_quark != 0)
+    {
+        set_width_hint (view_column, 0);
+    }
+}
 
 static void
 update_label (NautilusLabelCell *self)
@@ -69,11 +113,64 @@ nautilus_label_cell_set_property (GObject      *object,
         }
         break;
 
+        case PROP_VIEW_COLUMN:
+        {
+            g_set_weak_pointer (&self->view_column, g_value_get_object (value));
+        }
+        break;
+
         default:
         {
             G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
         }
     }
+}
+
+static void
+on_date_time_format_changed (NautilusLabelCell *self)
+{
+    /* The new format may be narrower, so let the column shrink. */
+    if (self->view_column != NULL)
+    {
+        set_width_hint (self->view_column, 0);
+    }
+
+    update_label (self);
+}
+
+static void
+nautilus_label_cell_measure (GtkWidget      *widget,
+                             GtkOrientation  orientation,
+                             int             for_size,
+                             int            *minimum,
+                             int            *natural,
+                             int            *minimum_baseline,
+                             int            *natural_baseline)
+{
+    NautilusLabelCell *self = NAUTILUS_LABEL_CELL (widget);
+
+    gtk_widget_measure (GTK_WIDGET (self->label), orientation, for_size,
+                        minimum, natural, minimum_baseline, natural_baseline);
+
+    if (orientation == GTK_ORIENTATION_HORIZONTAL && self->view_column != NULL)
+    {
+        int hint = MAX (get_width_hint (self->view_column), *natural);
+
+        set_width_hint (self->view_column, hint);
+        *minimum = MAX (*minimum, hint);
+        *natural = hint;
+    }
+}
+
+static void
+nautilus_label_cell_size_allocate (GtkWidget *widget,
+                                   int        width,
+                                   int        height,
+                                   int        baseline)
+{
+    NautilusLabelCell *self = NAUTILUS_LABEL_CELL (widget);
+
+    gtk_widget_allocate (GTK_WIDGET (self->label), width, height, baseline, NULL);
 }
 
 static void
@@ -118,7 +215,7 @@ nautilus_label_cell_constructed (GObject *object)
     if (nautilus_file_is_date_sort_attribute_q (self->attribute_q))
     {
         g_signal_connect_object (nautilus_preferences, "changed::" NAUTILUS_PREFERENCES_DATE_TIME_FORMAT,
-                                 G_CALLBACK (update_label), self,
+                                 G_CALLBACK (on_date_time_format_changed), self,
                                  G_CONNECT_SWAPPED);
     }
 
@@ -138,6 +235,7 @@ nautilus_label_cell_dispose (GObject *object)
     NautilusLabelCell *self = (NautilusLabelCell *) object;
 
     g_clear_object (&self->item_signal_group);
+    g_clear_weak_pointer (&self->view_column);
     if (self->label)
     {
         gtk_widget_unparent (GTK_WIDGET (self->label));
@@ -161,17 +259,27 @@ nautilus_label_cell_class_init (NautilusLabelCellClass *klass)
                                                    NAUTILUS_TYPE_COLUMN,
                                                    G_PARAM_WRITABLE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_STRINGS);
 
+    properties[PROP_VIEW_COLUMN] = g_param_spec_object ("view-column",
+                                                        "", "",
+                                                        GTK_TYPE_COLUMN_VIEW_COLUMN,
+                                                        G_PARAM_WRITABLE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_STRINGS);
+
     g_object_class_install_properties (object_class, N_PROPS, properties);
 
-    gtk_widget_class_set_layout_manager_type (widget_class, GTK_TYPE_BIN_LAYOUT);
+    widget_class->measure = nautilus_label_cell_measure;
+    widget_class->size_allocate = nautilus_label_cell_size_allocate;
+
+    width_hint_quark = g_quark_from_static_string ("nautilus-label-cell-width-hint");
 }
 
 NautilusViewCell *
-nautilus_label_cell_new (NautilusListBase *view,
-                         NautilusColumn   *column)
+nautilus_label_cell_new (NautilusListBase    *view,
+                         NautilusColumn      *column,
+                         GtkColumnViewColumn *view_column)
 {
     return NAUTILUS_VIEW_CELL (g_object_new (NAUTILUS_TYPE_LABEL_CELL,
                                              "view", view,
                                              "column", column,
+                                             "view-column", view_column,
                                              NULL));
 }

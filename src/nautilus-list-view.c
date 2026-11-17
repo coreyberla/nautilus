@@ -562,6 +562,25 @@ update_sort_directories_first (NautilusListView *self)
 }
 
 static void
+reset_column_width_hints (NautilusListView *self)
+{
+    GHashTableIter iter;
+    gpointer factory;
+
+    /* Let label columns shrink to fit the new contents. */
+    g_hash_table_iter_init (&iter, self->factory_to_column_map);
+    while (g_hash_table_iter_next (&iter, &factory, NULL))
+    {
+        GtkColumnViewColumn *view_column = g_object_get_data (factory, "nautilus-view-column");
+
+        if (view_column != NULL)
+        {
+            nautilus_label_cell_reset_width_hint (view_column);
+        }
+    }
+}
+
+static void
 nautilus_list_view_setup_directory (NautilusListBase  *list_base,
                                     NautilusDirectory *new_directory)
 {
@@ -570,6 +589,8 @@ nautilus_list_view_setup_directory (NautilusListBase  *list_base,
     NautilusFile *file;
 
     NAUTILUS_LIST_BASE_CLASS (nautilus_list_view_parent_class)->setup_directory (list_base, new_directory);
+
+    reset_column_width_hints (self);
 
     g_clear_object (&self->search_directory);
     if (NAUTILUS_IS_SEARCH_DIRECTORY (new_directory))
@@ -968,10 +989,12 @@ setup_label_cell (GtkSignalListItemFactory *factory,
     NautilusListView *self = user_data;
     NautilusColumn *nautilus_column;
     NautilusViewCell *cell;
+    GtkColumnViewColumn *view_column;
 
     nautilus_column = g_hash_table_lookup (self->factory_to_column_map, factory);
+    view_column = g_object_get_data (G_OBJECT (factory), "nautilus-view-column");
 
-    cell = nautilus_label_cell_new (NAUTILUS_LIST_BASE (user_data), nautilus_column);
+    cell = nautilus_label_cell_new (NAUTILUS_LIST_BASE (user_data), nautilus_column, view_column);
     gtk_column_view_cell_set_child (listitem, GTK_WIDGET (cell));
     setup_cell_common (G_OBJECT (listitem), cell, GTK_WIDGET (cell));
 }
@@ -1037,6 +1060,9 @@ setup_view_columns (NautilusListView *self)
         else
         {
             g_signal_connect (factory, "setup", G_CALLBACK (setup_label_cell), self);
+
+            /* Borrowed reference: the view column owns the factory. */
+            g_object_set_data (G_OBJECT (factory), "nautilus-view-column", view_column);
         }
 
         gtk_column_view_append_column (self->view_ui, view_column);
