@@ -205,6 +205,19 @@ nautilus_file_constructor (GType                  type,
     return object;
 }
 
+static void
+update_display_name_collation_keys (NautilusFile *file)
+{
+    const char *display_name = file->details->display_name;
+    g_autofree char *casefolded = g_utf8_casefold (display_name, -1);
+
+    g_free (file->details->display_name_collation_key);
+    file->details->display_name_collation_key = g_utf8_collate_key_for_filename (display_name, -1);
+
+    g_free (file->details->display_name_casefold_collation_key);
+    file->details->display_name_casefold_collation_key = g_utf8_collate_key_for_filename (casefolded, -1);
+}
+
 gboolean
 nautilus_file_set_display_name (NautilusFile *file,
                                 const char   *display_name,
@@ -258,8 +271,7 @@ nautilus_file_set_display_name (NautilusFile *file,
             file->details->display_name = g_ref_string_new (display_name);
         }
 
-        g_free (file->details->display_name_collation_key);
-        file->details->display_name_collation_key = g_utf8_collate_key_for_filename (display_name, -1);
+        update_display_name_collation_keys (file);
 
         g_object_notify_by_pspec (G_OBJECT (file), properties[PROP_DISPLAY_NAME]);
         g_object_notify_by_pspec (G_OBJECT (file), properties[PROP_A11Y_NAME]);
@@ -288,8 +300,8 @@ static void
 nautilus_file_clear_display_name (NautilusFile *file)
 {
     g_clear_pointer (&file->details->display_name, g_ref_string_release);
-    g_free (file->details->display_name_collation_key);
-    file->details->display_name_collation_key = NULL;
+    g_clear_pointer (&file->details->display_name_collation_key, g_free);
+    g_clear_pointer (&file->details->display_name_casefold_collation_key, g_free);
     g_clear_pointer (&file->details->edit_name, g_ref_string_release);
 }
 
@@ -848,6 +860,7 @@ finalize (GObject *object)
     g_clear_pointer (&file->details->name, g_ref_string_release);
     g_clear_pointer (&file->details->display_name, g_ref_string_release);
     g_free (file->details->display_name_collation_key);
+    g_free (file->details->display_name_casefold_collation_key);
     g_free (file->details->directory_name_collation_key);
     g_clear_pointer (&file->details->edit_name, g_ref_string_release);
     if (file->details->icon)
@@ -3299,9 +3312,20 @@ compare_by_display_name (NautilusFile *file_1,
     }
     else
     {
-        key_1 = nautilus_file_peek_display_name_collation_key (file_1);
-        key_2 = nautilus_file_peek_display_name_collation_key (file_2);
-        compare = strcmp (key_1, key_2);
+        /* Compare case-insensitively first, so that case differences in
+         * an early part of the name don't take precedence over numbers
+         * later in the name (e.g. "example04" < "Example05" < "example07").
+         * See https://gitlab.gnome.org/GNOME/glib/-/issues/62 */
+        key_1 = file_1->details->display_name_casefold_collation_key;
+        key_2 = file_2->details->display_name_casefold_collation_key;
+        compare = strcmp (key_1 != NULL ? key_1 : "", key_2 != NULL ? key_2 : "");
+
+        if (compare == 0)
+        {
+            key_1 = nautilus_file_peek_display_name_collation_key (file_1);
+            key_2 = nautilus_file_peek_display_name_collation_key (file_2);
+            compare = strcmp (key_1, key_2);
+        }
     }
 
     return compare;

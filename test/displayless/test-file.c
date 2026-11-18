@@ -89,6 +89,70 @@ test_file_sort_with_self (void)
     g_assert_cmpint (order, ==, 0);
 }
 
+static void
+test_file_sort_mixed_case_numbers (void)
+{
+    /* https://gitlab.gnome.org/GNOME/nautilus/-/issues/4363 */
+    const char *names[] =
+    {
+        "example04.txt", "Example05.txt", "Example06.txt", "example07.txt", "example08.txt",
+    };
+    NautilusFile *files[G_N_ELEMENTS (names)];
+
+    for (guint i = 0; i < G_N_ELEMENTS (names); i++)
+    {
+        g_autofree char *uri = g_strconcat ("file:///tmp/nautilus-test-sort/", names[i], NULL);
+        files[i] = nautilus_file_get_by_uri (uri);
+    }
+
+    for (guint i = 0; i < G_N_ELEMENTS (names); i++)
+    {
+        for (guint j = 0; j < G_N_ELEMENTS (names); j++)
+        {
+            int order = nautilus_file_compare_for_sort (files[i], files[j],
+                                                        NAUTILUS_FILE_SORT_BY_DISPLAY_NAME,
+                                                        FALSE, FALSE);
+
+            if (i < j)
+            {
+                g_assert_cmpint (order, <, 0);
+            }
+            else if (i > j)
+            {
+                g_assert_cmpint (order, >, 0);
+            }
+            else
+            {
+                g_assert_cmpint (order, ==, 0);
+            }
+        }
+    }
+
+    for (guint i = 0; i < G_N_ELEMENTS (names); i++)
+    {
+        nautilus_file_unref (files[i]);
+    }
+}
+
+static void
+test_file_sort_case_tiebreak (void)
+{
+    g_autoptr (NautilusFile) lower = nautilus_file_get_by_uri ("file:///tmp/nautilus-test-sort/file");
+    g_autoptr (NautilusFile) upper = nautilus_file_get_by_uri ("file:///tmp/nautilus-test-sort/File");
+    int order = nautilus_file_compare_for_sort (lower, upper,
+                                                NAUTILUS_FILE_SORT_BY_DISPLAY_NAME,
+                                                FALSE, FALSE);
+
+    int order_reversed = nautilus_file_compare_for_sort (upper, lower,
+                                                         NAUTILUS_FILE_SORT_BY_DISPLAY_NAME,
+                                                         FALSE, FALSE);
+
+    /* Names differing only by case must still have a stable, non-equal order */
+    g_assert_cmpint (order, !=, 0);
+    g_assert_cmpint (order_reversed, !=, 0);
+    g_assert_true ((order < 0) == (order_reversed > 0));
+}
+
 typedef struct
 {
     const gsize len;
@@ -470,6 +534,10 @@ main (int   argc,
                      test_file_sort_order);
     g_test_add_func ("/file-sort/with-self",
                      test_file_sort_with_self);
+    g_test_add_func ("/file-sort/mixed-case-numbers",
+                     test_file_sort_mixed_case_numbers);
+    g_test_add_func ("/file-sort/case-tiebreak",
+                     test_file_sort_case_tiebreak);
     g_test_add_func ("/file-batch-rename/cycles",
                      test_file_batch_rename_cycles);
     g_test_add_func ("/file-batch-rename/chains",
