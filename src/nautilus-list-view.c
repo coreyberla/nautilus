@@ -66,6 +66,8 @@ enum
 
 static guint signals[LAST_SIGNAL];
 
+#define NAME_COLUMN_MIN_WIDTH 150
+
 #define get_view_item(cell) \
         (NAUTILUS_VIEW_ITEM (gtk_tree_list_row_get_item (GTK_TREE_LIST_ROW (gtk_column_view_cell_get_item (cell)))))
 
@@ -1070,6 +1072,15 @@ setup_view_columns (NautilusListView *self)
             g_signal_connect (factory, "unbind", G_CALLBACK (unbind_name_cell), self);
 
             gtk_column_view_column_set_expand (view_column, TRUE);
+
+            /* Without a fixed width, GtkColumnView measures the natural width
+             * of every name cell whenever any of them changes, which happens
+             * for every row that gets rebound while scrolling. That requires
+             * laying out the full, unellipsized file name, which is expensive.
+             * As the column expands to fill the available space anyway, its
+             * natural width doesn't matter, so give it a fixed (minimum) width
+             * instead. */
+            gtk_column_view_column_set_fixed_width (view_column, NAME_COLUMN_MIN_WIDTH);
         }
         else if (g_strcmp0 (name, "starred") == 0)
         {
