@@ -8243,8 +8243,14 @@ nautilus_file_get_property (GObject    *object,
         case PROP_A11Y_NAME:
         {
             NautilusTagManager *tag_manager = nautilus_tag_manager_get ();
-            g_autofree gchar *uri = nautilus_file_get_uri (file);
-            gboolean is_starred = nautilus_tag_manager_file_is_starred (tag_manager, uri);
+            gboolean is_starred = FALSE;
+
+            if (nautilus_tag_manager_has_starred_files (tag_manager))
+            {
+                g_autofree gchar *uri = nautilus_file_get_uri (file);
+
+                is_starred = nautilus_tag_manager_file_is_starred (tag_manager, uri);
+            }
             gboolean is_directory = is_directory_internal (file);
 
             const gchar *role = is_directory ?

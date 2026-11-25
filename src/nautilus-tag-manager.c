@@ -382,6 +382,20 @@ nautilus_tag_manager_file_is_starred (NautilusTagManager *self,
     return g_hash_table_contains (self->starred_file_uris, file_uri);
 }
 
+/**
+ * nautilus_tag_manager_has_starred_files:
+ *
+ * Lets callers that check many files skip building their URIs when nothing
+ * is starred, e.g. when binding view cells while scrolling.
+ *
+ * Returns: whether any file is starred
+ */
+gboolean
+nautilus_tag_manager_has_starred_files (NautilusTagManager *self)
+{
+    return g_hash_table_size (self->starred_file_uris) > 0;
+}
+
 void
 nautilus_tag_manager_star_files (NautilusTagManager  *self,
                                  GObject             *object,
