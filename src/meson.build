@@ -178,6 +178,8 @@ libnautilus_sources = [
   'nautilus-monitor.c',
   'nautilus-monitor.h',
   'nautilus-name-cell.c',
+  'nautilus-name-label.c',
+  'nautilus-name-label.h',
   'nautilus-name-cell.h',
   'nautilus-network-address-bar.c',
   'nautilus-network-address-bar.h',

@@ -46,17 +46,12 @@ template $NautilusNameCell: $NautilusViewCell {
           hexpand: true;
           spacing: 6;
 
-          Label label {
-            ellipsize: middle;
-            lines: 1;
-            max-width-chars: -1;
-            wrap: false;
-            wrap-mode: word_char;
+          $NautilusNameLabel label {
             halign: start;
+            valign: center;
             has-tooltip: true;
-            attributes: "0 -1 insert-hyphens false";
             query-tooltip => $on_label_query_tooltip();
-            label: bind template.item as <$NautilusViewItem>.file as <$NautilusFile>.display-name;
+            text: bind template.item as <$NautilusViewItem>.file as <$NautilusFile>.display-name;
           }
 
           Box emblems_box {

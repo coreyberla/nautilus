@@ -12,6 +12,7 @@
 #include "nautilus-file.h"
 #include "nautilus-file-utilities.h"
 #include "nautilus-image.h"
+#include "nautilus-name-label.h"
 #include "nautilus-ui-utilities.h"
 #include "nautilus-view-item.h"
 
@@ -332,11 +333,11 @@ on_label_query_tooltip (GtkWidget  *widget,
                         GtkTooltip *tooltip,
                         gpointer    user_data)
 {
-    GtkLabel *label = GTK_LABEL (widget);
+    NautilusNameLabel *label = NAUTILUS_NAME_LABEL (widget);
 
-    if (pango_layout_is_ellipsized (gtk_label_get_layout (label)))
+    if (nautilus_name_label_is_ellipsized (label))
     {
-        gtk_tooltip_set_text (tooltip, gtk_label_get_text (label));
+        gtk_tooltip_set_text (tooltip, nautilus_name_label_get_text (label));
 
         return TRUE;
     }
@@ -461,6 +462,7 @@ nautilus_name_cell_class_init (NautilusNameCellClass *klass)
     widget_class->snapshot = snapshot;
 
     g_type_ensure (NAUTILUS_TYPE_IMAGE);
+    g_type_ensure (NAUTILUS_TYPE_NAME_LABEL);
 
     gtk_widget_class_set_layout_manager_type (widget_class, GTK_TYPE_BIN_LAYOUT);
     gtk_widget_class_set_template_from_resource (widget_class, "/org/gnome/nautilus/ui/nautilus-name-cell.ui");
