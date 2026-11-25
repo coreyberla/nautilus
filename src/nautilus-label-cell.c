@@ -12,6 +12,7 @@
 #include "libnautilus-extension/nautilus-column-private.h"
 #include "nautilus-file.h"
 #include "nautilus-global-preferences.h"
+#include "nautilus-name-label.h"
 #include "nautilus-view-item.h"
 
 struct _NautilusLabelCell
@@ -23,7 +24,7 @@ struct _NautilusLabelCell
     NautilusColumn *column;
     GQuark attribute_q;
 
-    GtkLabel *label;
+    NautilusNameLabel *label;
 };
 
 G_DEFINE_FINAL_TYPE (NautilusLabelCell, nautilus_label_cell, NAUTILUS_TYPE_VIEW_CELL)
@@ -49,7 +50,7 @@ update_label (NautilusLabelCell *self)
     file = nautilus_view_item_get_file (item);
 
     string = nautilus_file_get_string_attribute_q (file, self->attribute_q);
-    gtk_label_set_text (self->label, string);
+    nautilus_name_label_set_text (self->label, string);
 }
 
 static void
@@ -80,11 +81,12 @@ nautilus_label_cell_init (NautilusLabelCell *self)
 {
     GtkWidget *child;
 
-    child = gtk_label_new (NULL);
+    child = nautilus_name_label_new ();
+    nautilus_name_label_set_ellipsize (NAUTILUS_NAME_LABEL (child), PANGO_ELLIPSIZE_NONE);
     gtk_widget_set_parent (child, GTK_WIDGET (self));
     gtk_widget_set_valign (child, GTK_ALIGN_CENTER);
     gtk_widget_add_css_class (child, "dimmed");
-    self->label = GTK_LABEL (child);
+    self->label = NAUTILUS_NAME_LABEL (child);
 
     /* Connect automatically to an item. */
     self->item_signal_group = g_signal_group_new (NAUTILUS_TYPE_VIEW_ITEM);
@@ -111,7 +113,7 @@ nautilus_label_cell_constructed (GObject *object)
                   "attribute_q", &self->attribute_q,
                   "xalign", &xalign,
                   NULL);
-    gtk_label_set_xalign (self->label, xalign);
+    nautilus_name_label_set_xalign (self->label, xalign);
 
     if (nautilus_file_is_date_sort_attribute_q (self->attribute_q))
     {
@@ -127,6 +129,7 @@ nautilus_label_cell_constructed (GObject *object)
     else
     {
         gtk_widget_add_css_class (GTK_WIDGET (self->label), "numeric");
+        nautilus_name_label_set_tabular_numbers (self->label, TRUE);
     }
 }
 
@@ -172,4 +175,11 @@ nautilus_label_cell_new (NautilusListBase *view,
                                              "view", view,
                                              "column", column,
                                              NULL));
+}
+
+void
+nautilus_label_cell_set_text_cache (NautilusLabelCell *self,
+                                    NautilusTextCache *cache)
+{
+    nautilus_name_label_set_cache (self->label, cache);
 }

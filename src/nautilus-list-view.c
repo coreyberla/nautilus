@@ -51,6 +51,7 @@ struct _NautilusListView
     GtkColumnViewColumn *star_column;
     GtkWidget *column_editor;
     GHashTable *factory_to_column_map;
+    GHashTable *text_caches; /* NautilusColumn => NautilusTextCache */
 
     GtkSorter *view_model_sorter;
 };
@@ -876,6 +877,28 @@ tree_expander_shortcut_cb (GtkWidget *widget,
     return TRUE;
 }
 
+static NautilusTextCache *
+get_text_cache (NautilusListView *self,
+                NautilusColumn   *column)
+{
+    NautilusTextCache *cache;
+
+    if (self->text_caches == NULL)
+    {
+        self->text_caches = g_hash_table_new_full (NULL, NULL, NULL,
+                                                   (GDestroyNotify) nautilus_text_cache_free);
+    }
+
+    cache = g_hash_table_lookup (self->text_caches, column);
+    if (cache == NULL)
+    {
+        cache = nautilus_text_cache_new (1000);
+        g_hash_table_insert (self->text_caches, column, cache);
+    }
+
+    return cache;
+}
+
 static void
 setup_name_cell (GtkSignalListItemFactory *factory,
                  GtkColumnViewCell        *listitem,
@@ -888,6 +911,8 @@ setup_name_cell (GtkSignalListItemFactory *factory,
     setup_cell_common (G_OBJECT (listitem),
                        cell,
                        nautilus_name_cell_get_content (NAUTILUS_NAME_CELL (cell)));
+    nautilus_name_cell_set_text_cache (NAUTILUS_NAME_CELL (cell),
+                                       get_text_cache (self, g_hash_table_lookup (self->factory_to_column_map, factory)));
 
     g_object_bind_property (self, "icon-size",
                             cell, "icon-size",
@@ -1018,6 +1043,7 @@ setup_label_cell (GtkSignalListItemFactory *factory,
     nautilus_column = g_hash_table_lookup (self->factory_to_column_map, factory);
 
     cell = nautilus_label_cell_new (NAUTILUS_LIST_BASE (user_data), nautilus_column);
+    nautilus_label_cell_set_text_cache (NAUTILUS_LABEL_CELL (cell), get_text_cache (self, nautilus_column));
     gtk_column_view_cell_set_child (listitem, GTK_WIDGET (cell));
     setup_cell_common (G_OBJECT (listitem), cell, GTK_WIDGET (cell));
 }
@@ -1235,6 +1261,9 @@ nautilus_list_view_dispose (GObject *object)
 static void
 nautilus_list_view_finalize (GObject *object)
 {
+    NautilusListView *self = NAUTILUS_LIST_VIEW (object);
+
+    g_clear_pointer (&self->text_caches, g_hash_table_destroy);
     G_OBJECT_CLASS (nautilus_list_view_parent_class)->finalize (object);
 }
 

@@ -7,6 +7,7 @@
 #pragma once
 
 #include "nautilus-view-cell.h"
+#include "nautilus-text-cache.h"
 
 G_BEGIN_DECLS
 
@@ -22,5 +23,8 @@ void nautilus_name_cell_set_show_snippet (NautilusNameCell *self,
                                           gboolean          show);
 GtkTreeExpander * nautilus_name_cell_get_expander (NautilusNameCell *self);
 GtkWidget * nautilus_name_cell_get_content (NautilusNameCell *self);
+
+void nautilus_name_cell_set_text_cache (NautilusNameCell  *self,
+                                        NautilusTextCache *cache);
 
 G_END_DECLS

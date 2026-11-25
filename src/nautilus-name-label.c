@@ -9,23 +9,32 @@
 /**
  * NautilusNameLabel:
  *
- * A single-line, middle-ellipsizing text widget for file names in views.
+ * A single-line text widget for cells in views.
  *
  * Views rebind many rows per frame while scrolling, so this is optimized for
  * changing text: the text is laid out once and that layout is used both for
  * measuring and for drawing (GtkLabel lays an ellipsizing label out several
- * times per text change). Like GtkInscription, its height comes from font
- * metrics, so measuring height doesn't need a layout. Unlike GtkInscription,
- * it doesn't clip, so glyphs taller than the primary font (e.g. in fallback
- * fonts for other scripts) are not cut off, and its natural width is the
- * width of the text.
+ * times per text change). Its height comes from font metrics, so measuring
+ * height doesn't need a layout, but unlike GtkInscription it doesn't clip, so
+ * glyphs taller than the primary font (e.g. in fallback fonts for other
+ * scripts) are not cut off.
+ *
+ * If given a #NautilusTextCache, layouts are shared with the other users of
+ * the cache, so text that was laid out before doesn't need to be again.
  */
 struct _NautilusNameLabel
 {
     GtkWidget parent_instance;
 
     char *text;
-    PangoLayout *layout;
+    PangoEllipsizeMode ellipsize;
+    float xalign;
+    gboolean tabular_numbers;
+    PangoAttrList *attrs;
+    NautilusTextCache *cache; /* unowned */
+
+    PangoLayout *layout;    /* At unlimited width */
+    PangoLayout *ellipsized; /* NULL if the text fits */
 
     /* Cached, in pixels; -1 if unknown. */
     int natural_width;
@@ -54,6 +63,14 @@ invalidate_metrics (NautilusNameLabel *self)
 }
 
 static void
+invalidate_layouts (NautilusNameLabel *self)
+{
+    g_clear_object (&self->layout);
+    g_clear_object (&self->ellipsized);
+    self->natural_width = -1;
+}
+
+static void
 ensure_metrics (NautilusNameLabel *self)
 {
     if (self->line_height >= 0)
@@ -62,44 +79,63 @@ ensure_metrics (NautilusNameLabel *self)
     }
 
     PangoContext *context = gtk_widget_get_pango_context (GTK_WIDGET (self));
-    g_autoptr (PangoFontMetrics) metrics = pango_context_get_metrics (context, NULL, NULL);
     g_autoptr (PangoLayout) ellipsis = pango_layout_new (context);
-    int ascent = pango_font_metrics_get_ascent (metrics);
-    int descent = pango_font_metrics_get_descent (metrics);
 
-    self->line_height = PANGO_PIXELS_CEIL (ascent + descent);
-    self->baseline = PANGO_PIXELS_CEIL (ascent);
-
+    /* Use the height of a line in the primary font, as GtkLabel would have
+     * for text in that font, but measured once instead of for every text. */
     pango_layout_set_text (ellipsis, "…", -1);
-    pango_layout_get_pixel_size (ellipsis, &self->min_width, NULL);
+    pango_layout_get_pixel_size (ellipsis, &self->min_width, &self->line_height);
+    self->baseline = PANGO_PIXELS (pango_layout_get_baseline (ellipsis));
 }
 
-static PangoLayout *
-ensure_layout (NautilusNameLabel *self)
+static PangoAttrList *
+get_attrs (NautilusNameLabel *self)
 {
-    if (self->layout == NULL)
+    if (self->attrs == NULL)
     {
-        g_autoptr (PangoAttrList) attrs = pango_attr_list_new ();
-
-        self->layout = gtk_widget_create_pango_layout (GTK_WIDGET (self), self->text);
-        pango_layout_set_ellipsize (self->layout, PANGO_ELLIPSIZE_MIDDLE);
-        pango_layout_set_single_paragraph_mode (self->layout, TRUE);
-        pango_attr_list_insert (attrs, pango_attr_insert_hyphens_new (FALSE));
-        pango_layout_set_attributes (self->layout, attrs);
+        self->attrs = pango_attr_list_new ();
+        pango_attr_list_insert (self->attrs, pango_attr_insert_hyphens_new (FALSE));
+        if (self->tabular_numbers)
+        {
+            pango_attr_list_insert (self->attrs, pango_attr_font_features_new ("tnum=1"));
+        }
     }
 
-    return self->layout;
+    return self->attrs;
+}
+
+static void
+ensure_layout (NautilusNameLabel *self)
+{
+    const char *text = self->text != NULL ? self->text : "";
+
+    if (self->layout != NULL)
+    {
+        return;
+    }
+
+    if (self->cache != NULL)
+    {
+        int height;
+
+        self->layout = nautilus_text_cache_get (self->cache, GTK_WIDGET (self), text,
+                                                get_attrs (self),
+                                                &self->natural_width, &height);
+    }
+    else
+    {
+        self->layout = gtk_widget_create_pango_layout (GTK_WIDGET (self), text);
+        pango_layout_set_single_paragraph_mode (self->layout, TRUE);
+        pango_layout_set_attributes (self->layout, get_attrs (self));
+        pango_layout_get_pixel_size (self->layout, &self->natural_width, NULL);
+    }
 }
 
 static void
 context_changed (NautilusNameLabel *self)
 {
     invalidate_metrics (self);
-    self->natural_width = -1;
-    if (self->layout != NULL)
-    {
-        pango_layout_context_changed (self->layout);
-    }
+    invalidate_layouts (self);
     gtk_widget_queue_resize (GTK_WIDGET (self));
 }
 
@@ -118,16 +154,16 @@ nautilus_name_label_measure (GtkWidget      *widget,
 
     if (orientation == GTK_ORIENTATION_HORIZONTAL)
     {
-        if (self->natural_width < 0)
+        ensure_layout (self);
+
+        if (self->ellipsize == PANGO_ELLIPSIZE_NONE)
         {
-            PangoLayout *layout = ensure_layout (self);
-
-            /* This layout is reused for drawing if the text fits. */
-            pango_layout_set_width (layout, -1);
-            pango_layout_get_pixel_size (layout, &self->natural_width, NULL);
+            *minimum = self->natural_width;
         }
-
-        *minimum = MIN (self->min_width, self->natural_width);
+        else
+        {
+            *minimum = MIN (self->min_width, self->natural_width);
+        }
         *natural = self->natural_width;
     }
     else
@@ -144,17 +180,34 @@ nautilus_name_label_size_allocate (GtkWidget *widget,
                                    int        baseline)
 {
     NautilusNameLabel *self = NAUTILUS_NAME_LABEL (widget);
-    PangoLayout *layout = ensure_layout (self);
 
-    /* Only set a width (which lays the text out again) if it must be
-     * ellipsized. Otherwise keep the layout from measuring. */
-    if (self->natural_width >= 0 && self->natural_width <= width)
+    ensure_layout (self);
+
+    if (self->natural_width <= width || self->ellipsize == PANGO_ELLIPSIZE_NONE)
     {
-        pango_layout_set_width (layout, -1);
+        g_clear_object (&self->ellipsized);
+        return;
+    }
+
+    if (self->ellipsized != NULL &&
+        pango_layout_get_width (self->ellipsized) == width * PANGO_SCALE)
+    {
+        return;
+    }
+
+    g_clear_object (&self->ellipsized);
+    if (self->cache != NULL)
+    {
+        self->ellipsized = nautilus_text_cache_get_ellipsized (self->cache, widget,
+                                                               self->text != NULL ? self->text : "",
+                                                               get_attrs (self),
+                                                               self->ellipsize, width);
     }
     else
     {
-        pango_layout_set_width (layout, width * PANGO_SCALE);
+        self->ellipsized = pango_layout_copy (self->layout);
+        pango_layout_set_ellipsize (self->ellipsized, self->ellipsize);
+        pango_layout_set_width (self->ellipsized, width * PANGO_SCALE);
     }
 }
 
@@ -175,13 +228,19 @@ nautilus_name_label_snapshot (GtkWidget   *widget,
         return;
     }
 
-    layout = ensure_layout (self);
+    ensure_layout (self);
+    layout = self->ellipsized != NULL ? self->ellipsized : self->layout;
     pango_layout_get_pixel_extents (layout, NULL, &logical);
 
-    if (pango_layout_get_width (layout) < 0 &&
-        gtk_widget_get_direction (widget) == GTK_TEXT_DIR_RTL)
+    if (self->ellipsized == NULL)
     {
-        x = width - logical.width;
+        float xalign = self->xalign;
+
+        if (gtk_widget_get_direction (widget) == GTK_TEXT_DIR_RTL)
+        {
+            xalign = 1.0 - xalign;
+        }
+        x = floor (xalign * (width - logical.width));
     }
     x -= logical.x;
 
@@ -201,9 +260,15 @@ static void
 nautilus_name_label_system_setting_changed (GtkWidget        *widget,
                                             GtkSystemSetting  setting)
 {
+    NautilusNameLabel *self = NAUTILUS_NAME_LABEL (widget);
+
     GTK_WIDGET_CLASS (nautilus_name_label_parent_class)->system_setting_changed (widget, setting);
 
-    context_changed (NAUTILUS_NAME_LABEL (widget));
+    if (self->cache != NULL)
+    {
+        nautilus_text_cache_clear (self->cache);
+    }
+    context_changed (self);
 }
 
 static void
@@ -267,7 +332,8 @@ nautilus_name_label_finalize (GObject *object)
     NautilusNameLabel *self = NAUTILUS_NAME_LABEL (object);
 
     g_free (self->text);
-    g_clear_object (&self->layout);
+    invalidate_layouts (self);
+    g_clear_pointer (&self->attrs, pango_attr_list_unref);
 
     G_OBJECT_CLASS (nautilus_name_label_parent_class)->finalize (object);
 }
@@ -275,6 +341,7 @@ nautilus_name_label_finalize (GObject *object)
 static void
 nautilus_name_label_init (NautilusNameLabel *self)
 {
+    self->ellipsize = PANGO_ELLIPSIZE_MIDDLE;
     self->natural_width = -1;
     invalidate_metrics (self);
 }
@@ -306,6 +373,12 @@ nautilus_name_label_class_init (NautilusNameLabelClass *klass)
     gtk_widget_class_set_accessible_role (widget_class, GTK_ACCESSIBLE_ROLE_LABEL);
 }
 
+GtkWidget *
+nautilus_name_label_new (void)
+{
+    return g_object_new (NAUTILUS_TYPE_NAME_LABEL, NULL);
+}
+
 const char *
 nautilus_name_label_get_text (NautilusNameLabel *self)
 {
@@ -327,12 +400,7 @@ nautilus_name_label_set_text (NautilusNameLabel *self,
 
     g_free (self->text);
     self->text = g_strdup (text);
-    self->natural_width = -1;
-
-    if (self->layout != NULL)
-    {
-        pango_layout_set_text (self->layout, text != NULL ? text : "", -1);
-    }
+    invalidate_layouts (self);
 
     gtk_accessible_update_property (GTK_ACCESSIBLE (self),
                                     GTK_ACCESSIBLE_PROPERTY_LABEL, text,
@@ -340,6 +408,47 @@ nautilus_name_label_set_text (NautilusNameLabel *self,
     gtk_widget_queue_resize (GTK_WIDGET (self));
 
     g_object_notify_by_pspec (G_OBJECT (self), properties[PROP_TEXT]);
+}
+
+void
+nautilus_name_label_set_ellipsize (NautilusNameLabel  *self,
+                                   PangoEllipsizeMode  ellipsize)
+{
+    self->ellipsize = ellipsize;
+    g_clear_object (&self->ellipsized);
+    gtk_widget_queue_resize (GTK_WIDGET (self));
+}
+
+void
+nautilus_name_label_set_xalign (NautilusNameLabel *self,
+                                float              xalign)
+{
+    self->xalign = xalign;
+    gtk_widget_queue_draw (GTK_WIDGET (self));
+}
+
+void
+nautilus_name_label_set_tabular_numbers (NautilusNameLabel *self,
+                                         gboolean           tabular_numbers)
+{
+    self->tabular_numbers = tabular_numbers;
+    g_clear_pointer (&self->attrs, pango_attr_list_unref);
+    invalidate_layouts (self);
+    gtk_widget_queue_resize (GTK_WIDGET (self));
+}
+
+/**
+ * nautilus_name_label_set_cache:
+ * @cache: (nullable) (transfer none): a cache shared with other labels using
+ *   the same font, which must outlive @self
+ */
+void
+nautilus_name_label_set_cache (NautilusNameLabel *self,
+                               NautilusTextCache *cache)
+{
+    self->cache = cache;
+    invalidate_layouts (self);
+    gtk_widget_queue_resize (GTK_WIDGET (self));
 }
 
 /**
@@ -352,5 +461,5 @@ nautilus_name_label_is_ellipsized (NautilusNameLabel *self)
 {
     g_return_val_if_fail (NAUTILUS_IS_NAME_LABEL (self), FALSE);
 
-    return self->layout != NULL && pango_layout_is_ellipsized (self->layout);
+    return self->ellipsized != NULL && pango_layout_is_ellipsized (self->ellipsized);
 }

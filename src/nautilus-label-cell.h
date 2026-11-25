@@ -10,6 +10,7 @@
 #include "nautilus-types.h"
 
 #include "nautilus-view-cell.h"
+#include "nautilus-text-cache.h"
 
 G_BEGIN_DECLS
 
@@ -19,5 +20,8 @@ G_DECLARE_FINAL_TYPE (NautilusLabelCell, nautilus_label_cell, NAUTILUS, LABEL_CE
 
 NautilusViewCell * nautilus_label_cell_new (NautilusListBase *view,
                                             NautilusColumn   *column);
+
+void nautilus_label_cell_set_text_cache (NautilusLabelCell *self,
+                                         NautilusTextCache *cache);
 
 G_END_DECLS
