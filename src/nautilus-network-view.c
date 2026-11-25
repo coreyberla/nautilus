@@ -202,6 +202,7 @@ bind_cell (GtkSignalListItemFactory *factory,
     GtkWidget *cell = gtk_list_item_get_child (listitem);
     g_autoptr (NautilusViewItem) item = get_view_item (listitem);
 
+    nautilus_view_cell_set_item (NAUTILUS_VIEW_CELL (cell), item);
     nautilus_view_item_set_item_ui (item, cell);
 }
 
@@ -211,6 +212,8 @@ unbind_cell (GtkSignalListItemFactory *factory,
              gpointer                  user_data)
 {
     g_autoptr (NautilusViewItem) item = get_view_item (listitem);
+
+    nautilus_view_cell_set_item (NAUTILUS_VIEW_CELL (gtk_list_item_get_child (listitem)), NULL);
 
     /* item may be NULL when row has just been destroyed. */
     if (item != NULL)

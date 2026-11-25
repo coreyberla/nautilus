@@ -858,13 +858,10 @@ setup_cell_common (GObject          *listitem,
                    NautilusViewCell *cell,
                    GtkWidget        *hover_target)
 {
-    GtkExpression *expression;
     GtkEventController *controller;
     GtkDropTarget *drop_target;
 
-    expression = gtk_property_expression_new (GTK_TYPE_LIST_ITEM, NULL, "item");
-    expression = gtk_property_expression_new (GTK_TYPE_TREE_LIST_ROW, expression, "item");
-    gtk_expression_bind (expression, cell, "item", listitem);
+    /* NautilusViewCell:item is set by the views' factory bind/unbind handlers. */
     g_object_bind_property (listitem, "position", cell, "position", G_BINDING_SYNC_CREATE);
 
     controller = GTK_EVENT_CONTROLLER (gtk_gesture_click_new ());

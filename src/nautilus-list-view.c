@@ -965,6 +965,8 @@ bind_name_cell (GtkSignalListItemFactory *factory,
                                  self->file_path_base_location);
     nautilus_name_cell_set_show_snippet (NAUTILUS_NAME_CELL (cell), self->search_directory != NULL);
 
+    nautilus_view_cell_set_item (NAUTILUS_VIEW_CELL (cell), item);
+
     gtk_tree_expander_set_indent_for_icon (expander, self->expand_as_a_tree);
 
     if (self->expand_as_a_tree)
@@ -995,6 +997,8 @@ unbind_name_cell (GtkSignalListItemFactory *factory,
     NautilusListView *self = user_data;
     g_autoptr (NautilusViewItem) item = NULL;
 
+    nautilus_view_cell_set_item (NAUTILUS_VIEW_CELL (gtk_column_view_cell_get_child (listitem)), NULL);
+
     item = get_view_item (listitem);
     if (item == NULL)
     {
@@ -1017,6 +1021,24 @@ unbind_name_cell (GtkSignalListItemFactory *factory,
                                               on_row_children_changed,
                                               expander);
     }
+}
+
+static void
+bind_cell (GtkSignalListItemFactory *factory,
+           GtkColumnViewCell        *listitem,
+           gpointer                  user_data)
+{
+    g_autoptr (NautilusViewItem) item = get_view_item (listitem);
+
+    nautilus_view_cell_set_item (NAUTILUS_VIEW_CELL (gtk_column_view_cell_get_child (listitem)), item);
+}
+
+static void
+unbind_cell (GtkSignalListItemFactory *factory,
+             GtkColumnViewCell        *listitem,
+             gpointer                  user_data)
+{
+    nautilus_view_cell_set_item (NAUTILUS_VIEW_CELL (gtk_column_view_cell_get_child (listitem)), NULL);
 }
 
 static void
@@ -1111,6 +1133,8 @@ setup_view_columns (NautilusListView *self)
         else if (g_strcmp0 (name, "starred") == 0)
         {
             g_signal_connect (factory, "setup", G_CALLBACK (setup_star_cell), self);
+            g_signal_connect (factory, "bind", G_CALLBACK (bind_cell), self);
+            g_signal_connect (factory, "unbind", G_CALLBACK (unbind_cell), self);
 
             gtk_column_view_column_set_title (view_column, "");
             gtk_column_view_column_set_resizable (view_column, FALSE);
@@ -1120,6 +1144,8 @@ setup_view_columns (NautilusListView *self)
         else
         {
             g_signal_connect (factory, "setup", G_CALLBACK (setup_label_cell), self);
+            g_signal_connect (factory, "bind", G_CALLBACK (bind_cell), self);
+            g_signal_connect (factory, "unbind", G_CALLBACK (unbind_cell), self);
         }
 
         gtk_column_view_append_column (self->view_ui, view_column);

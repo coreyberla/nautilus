@@ -124,6 +124,7 @@ update_labels (NautilusNameCell *self)
         fts_snippet = nautilus_file_get_search_fts_snippet (file);
     }
 
+    nautilus_name_label_set_text (self->label, nautilus_file_get_display_name (file));
     gtk_label_set_text (GTK_LABEL (self->path), path_text);
     if (fts_snippet != NULL &&
         !g_str_equal (gtk_label_get_label (self->snippet), fts_snippet))

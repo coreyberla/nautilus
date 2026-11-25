@@ -420,6 +420,7 @@ bind_cell (GtkSignalListItemFactory *factory,
     GtkWidget *cell = gtk_list_item_get_child (listitem);
     GtkWidget *parent = gtk_widget_get_parent (cell);
 
+    nautilus_view_cell_set_item (NAUTILUS_VIEW_CELL (cell), item);
     nautilus_view_item_set_item_ui (item, cell);
 
     /* At the time of ::setup emission, the item ui has got no parent yet,
@@ -435,6 +436,8 @@ unbind_cell (GtkSignalListItemFactory *factory,
              gpointer                  user_data)
 {
     g_autoptr (NautilusViewItem) item = NULL;
+
+    nautilus_view_cell_set_item (NAUTILUS_VIEW_CELL (gtk_list_item_get_child (listitem)), NULL);
 
     item = get_view_item (listitem);
 
