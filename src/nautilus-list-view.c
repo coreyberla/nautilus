@@ -384,19 +384,48 @@ on_column_view_item_activated (GtkColumnView *column_view,
 }
 
 static void
-setup_row (GtkSignalListItemFactory *factory,
-           GtkColumnViewRow         *columnviewrow,
-           gpointer                  user_data)
+update_row_accessible_label (NautilusViewItem *item,
+                             GtkColumnViewRow *columnviewrow)
 {
-    GtkExpression *expression;
+    g_autofree char *a11y_name = NULL;
 
-    /* Use file display name as accessible label. Explaining in pseudo-code:
-     * columnviewrow:accessible-name :- columnviewrow:item:item:file:a11y-name */
-    expression = gtk_property_expression_new (GTK_TYPE_LIST_ITEM, NULL, "item");
-    expression = gtk_property_expression_new (GTK_TYPE_TREE_LIST_ROW, expression, "item");
-    expression = gtk_property_expression_new (NAUTILUS_TYPE_VIEW_ITEM, expression, "file");
-    expression = gtk_property_expression_new (NAUTILUS_TYPE_FILE, expression, "a11y-name");
-    gtk_expression_bind (expression, columnviewrow, "accessible-label", columnviewrow);
+    g_object_get (nautilus_view_item_get_file (item), "a11y-name", &a11y_name, NULL);
+    gtk_column_view_row_set_accessible_label (columnviewrow, a11y_name);
+}
+
+/* Use the file's accessible name as the row's accessible label. This is set
+ * from bind and on file changes rather than with an expression bound to
+ * row:item:item:file:a11y-name, which needs to watch every object in that
+ * chain anew each time a row is rebound while scrolling. */
+static void
+bind_row (GtkSignalListItemFactory *factory,
+          GtkColumnViewRow         *columnviewrow,
+          gpointer                  user_data)
+{
+    GtkTreeListRow *row = gtk_column_view_row_get_item (columnviewrow);
+    g_autoptr (NautilusViewItem) item = NAUTILUS_VIEW_ITEM (gtk_tree_list_row_get_item (row));
+
+    update_row_accessible_label (item, columnviewrow);
+    g_signal_connect_object (item, "file-changed",
+                             G_CALLBACK (update_row_accessible_label), columnviewrow,
+                             G_CONNECT_DEFAULT);
+}
+
+static void
+unbind_row (GtkSignalListItemFactory *factory,
+            GtkColumnViewRow         *columnviewrow,
+            gpointer                  user_data)
+{
+    GtkTreeListRow *row = gtk_column_view_row_get_item (columnviewrow);
+    g_autoptr (NautilusViewItem) item = NULL;
+
+    if (row == NULL)
+    {
+        return;
+    }
+
+    item = NAUTILUS_VIEW_ITEM (gtk_tree_list_row_get_item (row));
+    g_signal_handlers_disconnect_by_func (item, update_row_accessible_label, columnviewrow);
 }
 
 static GtkColumnView *
@@ -409,7 +438,8 @@ create_view_ui (NautilusListView *self)
 
     gtk_widget_set_hexpand (widget, TRUE);
 
-    g_signal_connect (row_factory, "setup", G_CALLBACK (setup_row), self);
+    g_signal_connect (row_factory, "bind", G_CALLBACK (bind_row), self);
+    g_signal_connect (row_factory, "unbind", G_CALLBACK (unbind_row), self);
 
     /* We don't use the built-in child activation feature for click because it
      * doesn't fill all our needs nor does it match our expected behavior.
