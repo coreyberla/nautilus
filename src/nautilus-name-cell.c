@@ -22,7 +22,7 @@ struct _NautilusNameCell
 {
     NautilusViewCell parent_instance;
 
-    GSignalGroup *item_signal_group;
+    GSignalGroup *item_signal_group; /* Unowned */
 
     GQuark path_attribute_q;
     GFile *file_path_base_location;
@@ -357,7 +357,7 @@ nautilus_name_cell_init (NautilusNameCell *self)
     g_signal_connect (self, "notify::scale-factor", G_CALLBACK (on_icon_size_changed), NULL);
 
     /* Connect automatically to an item. */
-    self->item_signal_group = g_signal_group_new (NAUTILUS_TYPE_VIEW_ITEM);
+    self->item_signal_group = nautilus_view_cell_get_item_signal_group (NAUTILUS_VIEW_CELL (self));
     g_signal_group_connect_swapped (self->item_signal_group, "notify::drag-accept",
                                     (GCallback) on_item_drag_accept_changed, self);
     g_signal_group_connect_swapped (self->item_signal_group, "notify::is-cut",
@@ -370,9 +370,6 @@ nautilus_name_cell_init (NautilusNameCell *self)
                              (GCallback) on_file_changed, self,
                              G_CONNECT_SWAPPED);
 
-    g_object_bind_property (self, "item",
-                            self->item_signal_group, "target",
-                            G_BINDING_SYNC_CREATE);
 }
 
 static void
@@ -381,7 +378,7 @@ nautilus_name_cell_dispose (GObject *object)
     NautilusNameCell *self = (NautilusNameCell *) object;
 
     g_clear_handle_id (&self->loading_timeout_id, g_source_remove);
-    g_clear_object (&self->item_signal_group);
+    self->item_signal_group = NULL; /* Owned by NautilusViewCell */
 
     gtk_widget_dispose_template (GTK_WIDGET (self), NAUTILUS_TYPE_NAME_CELL);
 

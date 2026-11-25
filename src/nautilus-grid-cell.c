@@ -20,7 +20,7 @@ struct _NautilusGridCell
 {
     NautilusViewCell parent_instance;
 
-    GSignalGroup *item_signal_group;
+    GSignalGroup *item_signal_group; /* Unowned */
 
     /* Unowned pointer from the grid view */
     GQuark *caption_attributes;
@@ -275,7 +275,7 @@ nautilus_grid_cell_dispose (GObject *object)
     NautilusGridCell *self = (NautilusGridCell *) object;
 
     gtk_widget_dispose_template (GTK_WIDGET (self), NAUTILUS_TYPE_GRID_CELL);
-    g_clear_object (&self->item_signal_group);
+    self->item_signal_group = NULL; /* Owned by NautilusViewCell */
 
     G_OBJECT_CLASS (nautilus_grid_cell_parent_class)->dispose (object);
 }
@@ -503,7 +503,7 @@ nautilus_grid_cell_init (NautilusGridCell *self)
                              G_CONNECT_SWAPPED);
 
     /* Connect automatically to an item. */
-    self->item_signal_group = g_signal_group_new (NAUTILUS_TYPE_VIEW_ITEM);
+    self->item_signal_group = nautilus_view_cell_get_item_signal_group (NAUTILUS_VIEW_CELL (self));
     g_signal_group_connect_swapped (self->item_signal_group, "notify::is-cut",
                                     (GCallback) update_icon, self);
     g_signal_group_connect_swapped (self->item_signal_group, "file-changed",
@@ -512,9 +512,6 @@ nautilus_grid_cell_init (NautilusGridCell *self)
                              (GCallback) on_file_changed, self,
                              G_CONNECT_SWAPPED);
 
-    g_object_bind_property (self, "item",
-                            self->item_signal_group, "target",
-                            G_BINDING_SYNC_CREATE);
 }
 
 NautilusGridCell *

@@ -23,6 +23,7 @@ struct _NautilusViewCellClass
 
 NautilusListBase *nautilus_view_cell_get_view (NautilusViewCell *self);
 NautilusViewItem *nautilus_view_cell_get_item (NautilusViewCell *self);
+GSignalGroup *nautilus_view_cell_get_item_signal_group (NautilusViewCell *self);
 void nautilus_view_cell_set_item (NautilusViewCell *self,
                                   NautilusViewItem *item);
 guint nautilus_view_cell_get_position (NautilusViewCell *self);

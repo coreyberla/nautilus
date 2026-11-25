@@ -17,7 +17,7 @@ struct _NautilusStarCell
 {
     NautilusViewCell parent_instance;
 
-    GSignalGroup *item_signal_group;
+    GSignalGroup *item_signal_group; /* Unowned */
 
     GtkButton *star;
 };
@@ -138,15 +138,12 @@ nautilus_star_cell_init (NautilusStarCell *self)
                              G_CALLBACK (on_starred_changed), self, G_CONNECT_DEFAULT);
 
     /* Connect automatically to an item. */
-    self->item_signal_group = g_signal_group_new (NAUTILUS_TYPE_VIEW_ITEM);
+    self->item_signal_group = nautilus_view_cell_get_item_signal_group (NAUTILUS_VIEW_CELL (self));
     g_signal_group_connect_swapped (self->item_signal_group, "file-changed",
                                     (GCallback) on_file_changed, self);
     g_signal_connect_object (self->item_signal_group, "bind",
                              (GCallback) on_file_changed, self,
                              G_CONNECT_SWAPPED);
-    g_object_bind_property (self, "item",
-                            self->item_signal_group, "target",
-                            G_BINDING_SYNC_CREATE);
 }
 
 static void
@@ -154,7 +151,7 @@ nautilus_star_cell_dispose (GObject *object)
 {
     NautilusStarCell *self = (NautilusStarCell *) object;
 
-    g_clear_object (&self->item_signal_group);
+    self->item_signal_group = NULL; /* Owned by NautilusViewCell */
     if (self->star)
     {
         gtk_widget_unparent (GTK_WIDGET (self->star));

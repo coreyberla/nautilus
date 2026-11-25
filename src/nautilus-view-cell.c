@@ -28,6 +28,7 @@ struct _NautilusViewCellPrivate
 
     NautilusListBase *view; /* Unowned */
     NautilusViewItem *item; /* Owned reference */
+    GSignalGroup *item_signal_group;
 
     guint icon_size;
     guint position;
@@ -145,6 +146,7 @@ nautilus_view_cell_dispose (GObject *object)
     NautilusViewCellPrivate *priv = nautilus_view_cell_get_instance_private (self);
 
     g_clear_object (&priv->item);
+    g_clear_object (&priv->item_signal_group);
     g_clear_weak_pointer (&priv->view);
 
     G_OBJECT_CLASS (nautilus_view_cell_parent_class)->dispose (object);
@@ -228,6 +230,31 @@ nautilus_view_cell_set_item (NautilusViewCell *self,
 
     if (g_set_object (&priv->item, item))
     {
+        if (priv->item_signal_group != NULL)
+        {
+            g_signal_group_set_target (priv->item_signal_group, item);
+        }
+
         g_object_notify_by_pspec (G_OBJECT (self), properties[PROP_ITEM]);
     }
+}
+
+/**
+ * nautilus_view_cell_get_item_signal_group:
+ *
+ * Returns: (transfer none): a #GSignalGroup whose target is always the cell's
+ *   #NautilusViewCell:item, for subclasses to connect to the item's signals.
+ */
+GSignalGroup *
+nautilus_view_cell_get_item_signal_group (NautilusViewCell *self)
+{
+    NautilusViewCellPrivate *priv = nautilus_view_cell_get_instance_private (self);
+
+    if (priv->item_signal_group == NULL)
+    {
+        priv->item_signal_group = g_signal_group_new (NAUTILUS_TYPE_VIEW_ITEM);
+        g_signal_group_set_target (priv->item_signal_group, priv->item);
+    }
+
+    return priv->item_signal_group;
 }

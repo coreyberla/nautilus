@@ -17,7 +17,7 @@ struct _NautilusNetworkCell
 {
     NautilusViewCell parent_instance;
 
-    GSignalGroup *item_signal_group;
+    GSignalGroup *item_signal_group; /* Unowned */
 
     GtkWidget *top_child;
     GtkWidget *icon;
@@ -88,7 +88,7 @@ nautilus_network_cell_init (NautilusNetworkCell *self)
     gtk_widget_init_template (GTK_WIDGET (self));
 
     /* Connect automatically to an item. */
-    self->item_signal_group = g_signal_group_new (NAUTILUS_TYPE_VIEW_ITEM);
+    self->item_signal_group = nautilus_view_cell_get_item_signal_group (NAUTILUS_VIEW_CELL (self));
     g_signal_group_connect_swapped (self->item_signal_group, "notify::loading",
                                     (GCallback) on_file_changed, self);
     g_signal_group_connect_swapped (self->item_signal_group, "file-changed",
@@ -97,9 +97,6 @@ nautilus_network_cell_init (NautilusNetworkCell *self)
                              (GCallback) on_file_changed, self,
                              G_CONNECT_SWAPPED);
 
-    g_object_bind_property (self, "item",
-                            self->item_signal_group, "target",
-                            G_BINDING_SYNC_CREATE);
 }
 
 static void
@@ -117,7 +114,7 @@ nautilus_network_cell_finalize (GObject *object)
 {
     NautilusNetworkCell *self = (NautilusNetworkCell *) object;
 
-    g_clear_object (&self->item_signal_group);
+    self->item_signal_group = NULL; /* Owned by NautilusViewCell */
     G_OBJECT_CLASS (nautilus_network_cell_parent_class)->finalize (object);
 }
 
