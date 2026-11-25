@@ -107,6 +107,21 @@ after_paint (GdkFrameClock *clock, gpointer data)
             dump_widths ();
             fprintf (stderr, "BENCH column width changes: %d\n", width_changes);
         }
+        {
+            int bins[5] = { 0 };
+            const char *names[5] = { "<=18ms(60fps)", "18-35ms(30fps)", "35-52ms(20fps)", "52-69ms(15fps)", ">69ms" };
+            for (int i = 1; i < n_frames; i++)
+            {
+                double d = (frame_start[i] - frame_start[i - 1]) / 1000.0;
+                bins[d <= 18 ? 0 : d <= 35 ? 1 : d <= 52 ? 2 : d <= 69 ? 3 : 4]++;
+            }
+            fprintf (stderr, "BENCH intervals:");
+            for (int i = 0; i < 5; i++)
+            {
+                fprintf (stderr, " %s=%d%%", names[i], 100 * bins[i] / (n_frames - 1));
+            }
+            fprintf (stderr, "\n");
+        }
         fprintf (stderr, "BENCH fps %.1f (wall-clock, %d frames)\n",
                  (n_frames - 1) / wall, n_frames);
         exit (0);
