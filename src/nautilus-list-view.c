@@ -1134,6 +1134,8 @@ static void
 nautilus_list_view_init (NautilusListView *self)
 {
     GtkWidget *scrolled_window = nautilus_list_base_get_scrolled_window (NAUTILUS_LIST_BASE (self));
+    extern void nautilus_scroll_bench_attach (GtkWidget *);
+    nautilus_scroll_bench_attach (scrolled_window);
     GtkSorter *column_view_sorter;
     GtkEventController *controller;
     GtkShortcut *shortcut;

@@ -161,6 +161,7 @@ libnautilus_sources = [
   'nautilus-list-base.c',
   'nautilus-list-base.h',
   'nautilus-list-view.c',
+  'nautilus-scroll-bench.c',
   'nautilus-list-view.h',
   'nautilus-localsearch-utilities.c',
   'nautilus-localsearch-utilities.h',
